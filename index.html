@@ -1,0 +1,1790 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>案件コックピット</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
+* { box-sizing: border-box; }
+:root { color-scheme: dark; }
+html, body { margin: 0; padding: 0; background: #0F1318; color: #E8ECF2; }
+button { cursor: pointer; font-family: inherit; }
+input, select, textarea { font-family: inherit; outline: none; color: #E8ECF2; background: #212834; }
+input::placeholder, textarea::placeholder { color: #616B7A; }
+select option { background: #212834; color: #E8ECF2; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #333B46; border-radius: 6px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#boot { font-family: 'Noto Sans JP', system-ui, sans-serif; color: #616B7A; padding: 40px; text-align: center; font-size: 14px; }
+</style>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+<script>
+/* window.storage を localStorage で代替（ブラウザ単体で永続化） */
+window.storage = {
+  get: (k) => { try { const v = localStorage.getItem(k); return Promise.resolve(v != null ? { key: k, value: v, shared: false } : null); } catch(e){ return Promise.resolve(null); } },
+  set: (k, v) => { try { localStorage.setItem(k, String(v)); } catch(e){} return Promise.resolve({ key: k, value: v, shared: false }); },
+  delete: (k) => { try { localStorage.removeItem(k); } catch(e){} return Promise.resolve({ key: k, deleted: true, shared: false }); },
+  list: (p) => { let keys = []; try { keys = Object.keys(localStorage).filter(k => !p || k.startsWith(p)); } catch(e){} return Promise.resolve({ keys, prefix: p, shared: false }); }
+};
+</script>
+</head>
+<body>
+<div id="root"><div id="boot">読み込み中…（初回はライブラリ取得のため数秒かかります）</div></div>
+<script type="text/babel" data-type="module" data-presets="react">
+import React, { useState, useEffect, useMemo, useRef } from "https://esm.sh/react@18.2.0";
+import { createRoot } from "https://esm.sh/react-dom@18.2.0/client?deps=react@18.2.0";
+import {
+  LayoutDashboard, Briefcase, ListChecks, Plus, X, Trash2, Reply,
+  Clock, CheckCircle2, Circle, AlertTriangle, Inbox, Sparkles, Copy, Check,
+  CalendarDays, Coins, ExternalLink, GripVertical, Settings, ChevronLeft, ChevronRight, ListPlus
+} from "https://esm.sh/lucide-react@0.383.0?deps=react@18.2.0";
+
+/* ============================================================
+   案件コックピット — フリーランス案件管理ダッシュボード
+   データは window.storage に永続保存（このブラウザ内）
+   ============================================================ */
+
+const STORE_KEY = "cockpit:projects:v1";
+const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
+
+const PLATFORMS = {
+  "クラウドワークス": "#FF9F43",
+  "ランサーズ": "#54B8F0",
+  "ココナラ": "#FF8A5B",
+  "直契約": "#3DD6C4",
+  "その他": "#8E97A6",
+};
+const STATUSES = ["応募中", "進行中", "納品待ち", "検収中", "完了"];
+const REPLIES = ["なし", "要返信", "返信済み", "相手待ち"];
+
+const TASK_LANES = [
+  { key: "today",   label: "今日",       color: "#FF922B", tint: "rgba(255,146,43,0.15)" },
+  { key: "later",   label: "明日",       color: "#2DD4BF", tint: "rgba(45,212,191,0.14)" },
+  { key: "waiting", label: "相手待ち",   color: "#8B92F5", tint: "rgba(139,146,245,0.16)" },
+  { key: "payment", label: "支払い待ち", color: "#51CF66", tint: "rgba(81,207,102,0.15)" },
+];
+
+const INBOX_ID = "__inbox__";
+function makeInbox() {
+  return { id: INBOX_ID, company: "案件なし", platform: "その他", work: "", reward: 0,
+    status: "進行中", reply: "なし", deadline: "", note: "",
+    received: "", replyDraft: "", repliedAt: null, replyUrl: "", tasks: [] };
+}
+
+const REPLY_META = {
+  "要返信":   { color: "#FF922B", bg: "rgba(255,146,43,0.15)", label: "要返信" },
+  "返信済み": { color: "#51CF66", bg: "rgba(81,207,102,0.15)", label: "返信済み" },
+  "相手待ち": { color: "#8B92F5", bg: "rgba(139,146,245,0.16)", label: "相手待ち" },
+  "なし":     { color: "#616B7A", bg: "#212834", label: "—" },
+};
+const STATUS_META = {
+  "応募中":   "#8B92F5",
+  "進行中":   "#2DD4BF",
+  "納品待ち": "#E0913A",
+  "検収中":   "#A78BFA",
+  "完了":     "#8A93A0",
+};
+
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+// TODAY基準で YYYY-MM-DD を返す
+const dStr = (offset = 0) => {
+  const d = new Date(TODAY); d.setDate(d.getDate() + offset);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+// 返信タスク（当日期限）
+const reply = (title) => ({ id: uid(), title, done: false, due: dStr(0), lane: "today", kind: "reply" });
+const task = (title, offset, lane = "today", done = false) => ({ id: uid(), title, done, due: offset == null ? "" : dStr(offset), lane, kind: "task" });
+
+function makeSample() {
+  return [
+    {
+      id: uid(), company: "香典返しe-shop", platform: "直契約",
+      work: "ShopServe トップページ改装・商品ページ改修", reward: 33000,
+      status: "進行中", reply: "要返信", deadline: dStr(4),
+      note: "Chatworkでやり取り。トップ改装の見積り交渉中。",
+      received: "お世話になっております。先日ご提案いただいたトップページ改装の件、社内で前向きに検討しております。改めてお見積りと、対応にかかる期間の目安を教えていただけますでしょうか。あわせて、商品ページの修正分は今週中に反映可能でしょうか。",
+      replyDraft: "", repliedAt: null,
+      replyUrl: "https://www.chatwork.com/#!rid000000000",
+      tasks: [
+        reply("見積りと対応期間を返信"),
+        task("トップページ改装の構成案を作成", 3, "today"),
+        task("商品ページのデザイン修正", null, "later", true),
+      ],
+      createdAt: Date.now(),
+    },
+    {
+      id: uid(), company: "NPO法人 Salon de Kid's ネット", platform: "クラウドワークス",
+      work: "WordPressサイトリニューアル", reward: 35000,
+      status: "進行中", reply: "相手待ち", deadline: dStr(4),
+      note: "クラウドワークス経由。画像の利用許諾を要確認。",
+      received: "", replyDraft: "", repliedAt: null,
+      replyUrl: "https://crowdworks.jp/proposals/000000",
+      tasks: [
+        task("クライアント支給素材の反映", null, "later", true),
+        task("画像の利用許諾を確認", 2, "waiting"),
+        task("WordPress本番環境へ移行", 4, "today"),
+      ],
+      createdAt: Date.now(),
+    },
+    {
+      id: uid(), company: "HARUTAS / Kitchen.Work", platform: "直契約",
+      work: "住宅ECブログ執筆（note・楽天、週2〜3本）", reward: 0,
+      status: "進行中", reply: "要返信", deadline: dStr(2),
+      note: "継続案件。Chatworkで記事テーマをやり取り。",
+      received: "２点ご連絡です。①次回のnote記事のテーマは「狭小住宅の収納術」で進めていただけますか。②前回の楽天記事、見出しを2つ追加でご対応お願いできますか。お手すきにご返信ください。",
+      replyDraft: "", repliedAt: null,
+      replyUrl: "https://www.chatwork.com/#!rid000000001",
+      tasks: [
+        reply("次回記事テーマの確認に返信"),
+        reply("前回記事の修正依頼に返信"),
+        task("note記事を2本執筆", 2, "today"),
+        task("楽天ブログ記事を1本執筆", 5, "later"),
+      ],
+      createdAt: Date.now(),
+    },
+    {
+      id: uid(), company: "水上工芸", platform: "直契約",
+      work: "コーポレートサイト（Next.js / Vercel）", reward: 120000,
+      status: "納品待ち", reply: "なし", deadline: dStr(1),
+      note: "mizukamikougei.com。Vercelで運用。",
+      received: "", replyDraft: "", repliedAt: null, replyUrl: "",
+      tasks: [
+        task("最終デプロイ確認", 1, "today"),
+        task("納品後の入金確認", null, "payment"),
+      ],
+      createdAt: Date.now(),
+    },
+    {
+      id: uid(), company: "サイエンスウェブ（SWT）", platform: "直契約",
+      work: "LP制作（PhotoIUPAC 2028 ほか）", reward: 0,
+      status: "進行中", reply: "要返信", deadline: dStr(6),
+      note: "Chatworkでデザイン確認中。",
+      received: "LP初稿を拝見しました。ファーストビューの配色について何点かご相談したく、ご返信いただけますと幸いです。",
+      replyDraft: "", repliedAt: null,
+      replyUrl: "https://www.chatwork.com/#!rid000000002",
+      tasks: [
+        reply("LP初稿のフィードバックに返信"),
+        task("PhotoIUPAC 2028 LPのデザイン調整", 3, "today"),
+        task("日本超特価部品デモの修正", 6, "later"),
+      ],
+      createdAt: Date.now(),
+    },
+    {
+      id: uid(), company: "株式会社KRO", platform: "クラウドワークス",
+      work: "FXアフィリエイト記事の執筆", reward: 18000,
+      status: "進行中", reply: "なし", deadline: dStr(3),
+      note: "クラウドワークス経由。",
+      received: "", replyDraft: "", repliedAt: null,
+      replyUrl: "https://crowdworks.jp/proposals/000001",
+      tasks: [
+        task("FX記事の構成を作成", 1, "today"),
+        task("FX記事の本文を執筆", 3, "later"),
+      ],
+      createdAt: Date.now(),
+    },
+    {
+      id: uid(), company: "GeNieee（南るな様）", platform: "直契約",
+      work: "Chatworkリマインダーツール（テスト案件）", reward: 0,
+      status: "進行中", reply: "要返信", deadline: dStr(2),
+      note: "GAS開発。Chatworkでやり取り。",
+      received: "テスト版をお試しいただきありがとうございます。検知のタイミングについて1点ご確認させてください。ご都合よいときにご返信ください。",
+      replyDraft: "", repliedAt: null,
+      replyUrl: "https://www.chatwork.com/#!rid000000003",
+      tasks: [
+        reply("南様へテスト結果を返信"),
+        task("GASリマインダーの動作テスト", 2, "today"),
+      ],
+      createdAt: Date.now(),
+    },
+    {
+      id: uid(), company: "Chatwork監視ツール（自社開発）", platform: "その他",
+      work: "GAS + Claude API 返信ドラフト自動生成", reward: 0,
+      status: "進行中", reply: "なし", deadline: "",
+      note: "Claudeで開発中。全ルーム巡回 → 返信案をスプレッドシート出力。",
+      received: "", replyDraft: "", repliedAt: null, replyUrl: "",
+      tasks: [
+        task("全ルーム巡回ロジックの実装", 1, "today"),
+        task("返信ドラフト生成の精度調整", 4, "later"),
+      ],
+      createdAt: Date.now(),
+    },
+    {
+      id: uid(), company: "案件コックピット（このアプリ）", platform: "その他",
+      work: "案件・タスク管理ダッシュボード", reward: 0,
+      status: "進行中", reply: "なし", deadline: "",
+      note: "Claudeで開発中。Vercelに公開予定。",
+      received: "", replyDraft: "", repliedAt: null, replyUrl: "",
+      tasks: [
+        task("返信タスクのカレンダー表示を確認", 0, "today"),
+        task("Vercelへデプロイ", 2, "later"),
+      ],
+      createdAt: Date.now(),
+    },
+    {
+      id: uid(), company: "@afimana7（X収益化）", platform: "その他",
+      work: "ChatGPT×アフィリエイト発信・収益化", reward: 0,
+      status: "進行中", reply: "なし", deadline: "",
+      note: "3本柱戦略で月10万円が目標。",
+      received: "", replyDraft: "", repliedAt: null, replyUrl: "",
+      tasks: [
+        task("X投稿を3本作成", 1, "today"),
+        task("note商品のLPを改善", 6, "later"),
+      ],
+      createdAt: Date.now(),
+    },
+    {
+      id: uid(), company: "ベストバイ本舗（メルカリShops）", platform: "その他",
+      work: "女性アクセサリー（AliExpress仕入れ）", reward: 0,
+      status: "進行中", reply: "なし", deadline: "",
+      note: "Googleタスクで在庫・仕入れ管理。",
+      received: "", replyDraft: "", repliedAt: null, replyUrl: "",
+      tasks: [
+        task("AliExpressから新商品を仕入れ", 3, "later"),
+        task("商品ページを5点作成", 5, "later"),
+      ],
+      createdAt: Date.now(),
+    },
+    {
+      id: uid(), company: "コスモスの里", platform: "直契約",
+      work: "介護施設サイト制作（WordPress）", reward: 0,
+      status: "完了", reply: "なし", deadline: "",
+      note: "福山市。4月に納品・検収完了。",
+      received: "", replyDraft: "", repliedAt: null, replyUrl: "",
+      tasks: [], createdAt: Date.now(),
+    },
+    {
+      id: uid(), company: "naotosatoh.jp", platform: "直契約",
+      work: "EC停止 + STORES移行", reward: 0,
+      status: "完了", reply: "なし", deadline: "",
+      note: "5月に移行完了。", received: "", replyDraft: "", repliedAt: null, replyUrl: "",
+      tasks: [], createdAt: Date.now(),
+    },
+  ];
+}
+
+/* ---------- 日付ユーティリティ ---------- */
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr); d.setHours(0, 0, 0, 0);
+  return Math.round((d - TODAY) / 86400000);
+}
+function dueMeta(dateStr) {
+  const n = daysUntil(dateStr);
+  if (n === null) return { n, color: "#616B7A", text: "期限なし", urgent: false };
+  if (n < 0)  return { n, color: "#FF6B6B", text: `${Math.abs(n)}日超過`, urgent: true };
+  if (n === 0) return { n, color: "#FF6B6B", text: "今日", urgent: true };
+  if (n === 1) return { n, color: "#FF922B", text: "明日", urgent: true };
+  if (n <= 3) return { n, color: "#F5A623", text: `あと${n}日`, urgent: true };
+  if (n <= 7) return { n, color: "#2DD4BF", text: `あと${n}日`, urgent: false };
+  return { n, color: "#9AA4B2", text: `あと${n}日`, urgent: false };
+}
+const yen = (v) => (v ? "¥" + v.toLocaleString("ja-JP") : "—");
+
+/* 旧データ（laneなし）にレーンを補完 */
+function laneFromDue(due) {
+  const n = daysUntil(due);
+  if (n !== null && n <= 0) return "today";
+  return "later";
+}
+function normalizeProjects(arr) {
+  let list = arr.map((p) => ({
+    ...p,
+    received: p.received ?? "", replyDraft: p.replyDraft ?? "", repliedAt: p.repliedAt ?? null, replyUrl: p.replyUrl ?? "",
+    tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task" })),
+  }));
+  if (!list.some((p) => p.id === INBOX_ID)) list = [...list, makeInbox()];
+  return list;
+}
+// 未対応の返信タスク
+const replyTasksOf = (p) => (p.tasks || []).filter((t) => t.kind === "reply" && !t.done);
+
+/* Claude呼び出し。APIキーがあればブラウザ直アクセス（HTML版）、なければプロキシ（Claudeアプリ版） */
+async function callClaude({ system, user, maxTokens = 1000 }) {
+  let apiKey = "";
+  try { const r = await window.storage.get("cockpit:apikey"); apiKey = (r && r.value) || ""; } catch {}
+  const headers = { "Content-Type": "application/json" };
+  if (apiKey) {
+    headers["x-api-key"] = apiKey;
+    headers["anthropic-version"] = "2023-06-01";
+    headers["anthropic-dangerous-direct-browser-access"] = "true";
+  }
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST", headers,
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }),
+  });
+  if (!res.ok) throw new Error("API " + res.status);
+  const data = await res.json();
+  return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+}
+
+/* ============================================================
+   メインコンポーネント
+   ============================================================ */
+export default function App() {
+  const [projects, setProjects] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState("focus");
+  const [editing, setEditing] = useState(null); // draft object or null
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+
+  /* ---- load ---- */
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get(STORE_KEY);
+        setProjects(r && r.value ? normalizeProjects(JSON.parse(r.value)) : normalizeProjects(makeSample()));
+        if (!r || !r.value) await window.storage.set(STORE_KEY, JSON.stringify(normalizeProjects(makeSample())));
+      } catch {
+        setProjects(normalizeProjects(makeSample()));
+        try { await window.storage.set(STORE_KEY, JSON.stringify(normalizeProjects(makeSample()))); } catch {}
+      } finally { setLoading(false); }
+    })();
+  }, []);
+
+  const persist = async (next) => {
+    setProjects(next);
+    try { await window.storage.set(STORE_KEY, JSON.stringify(next)); } catch {}
+  };
+
+  /* ---- mutations ---- */
+  const saveProject = (draft) => {
+    const exists = projects.some((p) => p.id === draft.id);
+    const next = exists
+      ? projects.map((p) => (p.id === draft.id ? draft : p))
+      : [{ ...draft, createdAt: Date.now() }, ...projects];
+    persist(next); setEditing(null);
+  };
+  const removeProject = (id) => { persist(projects.filter((p) => p.id !== id)); setConfirmDel(null); setEditing(null); };
+  const toggleTask = (pid, tid) =>
+    persist(projects.map((p) => p.id !== pid ? p : {
+      ...p, tasks: p.tasks.map((t) => t.id === tid ? { ...t, done: !t.done } : t),
+    }));
+  const changeLane = (pid, tid, lane) =>
+    persist(projects.map((p) => p.id !== pid ? p : {
+      ...p, tasks: p.tasks.map((t) => t.id === tid ? { ...t, lane } : t),
+    }));
+  const addTaskToLane = (pid, lane, title) =>
+    persist(projects.map((p) => p.id !== pid ? p : {
+      ...p, tasks: [...p.tasks, { id: uid(), title, done: false, due: "", lane, kind: "task" }],
+    }));
+
+  /* ---- derived ---- */
+  const active = useMemo(() => projects.filter((p) => p.status !== "完了" && p.id !== INBOX_ID), [projects]);
+  const kpi = useMemo(() => {
+    const needReply = active.reduce((s, p) => s + replyTasksOf(p).length, 0);
+    const weekDue = active.filter((p) => { const n = daysUntil(p.deadline); return n !== null && n >= 0 && n <= 7; }).length;
+    const overdue = active.filter((p) => { const n = daysUntil(p.deadline); return n !== null && n < 0; }).length;
+    const revenue = active.reduce((s, p) => s + (Number(p.reward) || 0), 0);
+    return { needReply, weekDue, overdue, inProgress: active.length, revenue };
+  }, [active]);
+
+  if (loading) return (
+    <div style={S.shell}>
+      <Fonts />
+      <div style={{ ...S.center, color: "#616B7A", fontFamily: F.body }}>読み込み中…</div>
+    </div>
+  );
+
+  return (
+    <div style={S.shell}>
+      <Fonts />
+
+      {/* ===== Header ===== */}
+      <header style={S.header}>
+        <div style={S.brand}>
+          <div style={S.brandMark}>◆</div>
+          <div>
+            <div style={S.brandTitle}>案件コックピット</div>
+            <div style={S.brandSub}>{active.length}件 進行中 · {kpi.needReply}件 要返信</div>
+          </div>
+        </div>
+        <nav style={S.tabs}>
+          {[
+            ["focus", "フォーカス", LayoutDashboard],
+            ["projects", "案件", Briefcase],
+            ["tasks", "タスク", ListChecks],
+            ["calendar", "カレンダー", CalendarDays],
+          ].map(([k, label, Icon]) => (
+            <button key={k} onClick={() => setView(k)} title={label} aria-label={label}
+              style={{ ...S.tab, ...(view === k ? S.tabOn : {}) }}>
+              <Icon size={22} strokeWidth={view === k ? 2.4 : 2} />
+            </button>
+          ))}
+        </nav>
+        <button style={S.iconBtnHeader} onClick={() => setShowSettings(true)} title="設定（APIキー）">
+          <Settings size={18} strokeWidth={2} />
+        </button>
+        <button style={S.addBtn} onClick={() => setEditing(blankDraft())}>
+          <Plus size={16} strokeWidth={2.6} /> <span style={S.addLabel}>案件を追加</span>
+        </button>
+      </header>
+
+      {/* ===== Body ===== */}
+      <main style={S.main}>
+        {view === "focus" && <FocusView kpi={kpi} projects={active} onOpen={setEditing} />}
+        {view === "projects" && <ProjectsView projects={projects} onOpen={setEditing} />}
+        {view === "tasks" && <TasksView projects={projects} onToggle={toggleTask} onOpen={setEditing} onChangeLane={changeLane} onAddTask={addTaskToLane} />}
+        {view === "calendar" && <CalendarView projects={projects} onOpen={setEditing} />}
+      </main>
+
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+
+      {/* ===== Drawer ===== */}
+      {editing && (
+        <Drawer
+          draft={editing}
+          onClose={() => setEditing(null)}
+          onSave={saveProject}
+          onDelete={(id) => setConfirmDel(id)}
+          confirmDel={confirmDel}
+          onConfirmDelete={removeProject}
+          onCancelDelete={() => setConfirmDel(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   フォーカス（ダッシュボード）
+   ============================================================ */
+function FocusView({ kpi, projects, onOpen }) {
+  const [openCard, setOpenCard] = useState(null);
+
+  // 返信タスク（案件ごと複数あり得る）
+  const replyEntries = projects.flatMap((p) => replyTasksOf(p).map((t) => ({ p, t })));
+
+  // 優先リスト: 未対応の返信を持つ案件を最優先、その後 締切が近い順
+  const priority = [...projects].sort((a, b) => {
+    const ar = replyTasksOf(a).length > 0 ? 0 : 1;
+    const br = replyTasksOf(b).length > 0 ? 0 : 1;
+    if (ar !== br) return ar - br;
+    const an = daysUntil(a.deadline), bn = daysUntil(b.deadline);
+    if (an === null) return 1; if (bn === null) return -1;
+    return an - bn;
+  });
+
+  const lists = {
+    weekDue: projects.filter((p) => { const n = daysUntil(p.deadline); return n !== null && n >= 0 && n <= 7; })
+      .sort((a, b) => daysUntil(a.deadline) - daysUntil(b.deadline)),
+    overdue: projects.filter((p) => { const n = daysUntil(p.deadline); return n !== null && n < 0; })
+      .sort((a, b) => daysUntil(a.deadline) - daysUntil(b.deadline)),
+    progress: [...projects].sort((a, b) => (Number(b.reward) || 0) - (Number(a.reward) || 0)),
+  };
+
+  const cards = [
+    { key: "reply", label: "要返信", value: kpi.needReply, unit: "件", color: "#FF922B", Icon: Reply, hot: kpi.needReply > 0 },
+    { key: "weekDue", label: "今週の締切", value: kpi.weekDue, unit: "件", color: "#2DD4BF", Icon: CalendarDays },
+    { key: "overdue", label: "期限超過", value: kpi.overdue, unit: "件", color: "#FF6B6B", Icon: AlertTriangle, hot: kpi.overdue > 0 },
+    { key: "progress", label: "進行中の見込み", value: kpi.revenue ? "¥" + kpi.revenue.toLocaleString("ja-JP") : "—", unit: "", color: "#E8ECF2", Icon: Coins, wide: true, count: kpi.inProgress },
+  ];
+
+  const titleOf = { reply: "本日中に返信", weekDue: "今週が締切の案件", overdue: "期限を過ぎている案件", progress: "進行中の案件" };
+  const panelColor = cards.find((c) => c.key === openCard)?.color || C.accent;
+  const panelList = openCard === "reply" ? replyEntries : (openCard ? lists[openCard] : []);
+
+  return (
+    <div style={S.colWrap}>
+      <div style={S.kpiRow}>
+        {cards.map((c) => {
+          const opened = openCard === c.key;
+          return (
+            <button key={c.key} onClick={() => setOpenCard(opened ? null : c.key)}
+              style={{ ...S.kpiCard, ...S.kpiCardBtn, ...(c.hot ? { boxShadow: `inset 0 0 0 1.5px ${c.color}33` } : {}), ...(opened ? { borderColor: c.color } : {}) }}>
+              <div style={S.kpiTop}>
+                <span style={S.kpiLabel}>{c.label}</span>
+                <c.Icon size={17} color={c.color} strokeWidth={2.2} />
+              </div>
+              <div style={{ ...S.kpiValue, color: c.color, fontSize: c.wide ? 26 : 34 }}>
+                {c.value}<span style={S.kpiUnit}>{c.unit}</span>
+              </div>
+              <span style={S.kpiHint}>{opened ? "閉じる" : "タップで一覧"}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {openCard && (
+        <div style={{ ...S.replyPanel, borderColor: panelColor + "66" }}>
+          <div style={S.replyPanelHead}>
+            <span style={{ ...S.replyPanelDot, background: panelColor }} />
+            <span style={S.replyPanelTitle}>{titleOf[openCard]}</span>
+            <span style={S.replyPanelNum}>{panelList.length}件</span>
+            <button style={S.replyPanelClose} onClick={() => setOpenCard(null)}><X size={17} /></button>
+          </div>
+          {panelList.length === 0 && <div style={S.replyPanelEmpty}>該当する項目はありません。</div>}
+
+          {openCard === "reply" && replyEntries.map(({ p, t }) => (
+            <div key={t.id} style={S.replyItem}>
+              <button style={S.replyItemMain} onClick={() => onOpen(p)}>
+                <PlatformChip name={p.platform} small />
+                <span style={S.replyItemCol}>
+                  <span style={S.replyItemName}>{p.company}</span>
+                  <span style={S.replyItemSub}>{t.title}</span>
+                </span>
+                <span style={{ ...S.replyItemDue, color: "#FF922B" }}>本日中</span>
+              </button>
+              {p.replyUrl && (
+                <a href={p.replyUrl} target="_blank" rel="noopener noreferrer" style={S.replyItemLink}>
+                  <ExternalLink size={13} strokeWidth={2.4} />開く
+                </a>
+              )}
+            </div>
+          ))}
+
+          {openCard !== "reply" && panelList.map((p) => {
+            const dm = dueMeta(p.deadline);
+            return (
+              <div key={p.id} style={S.replyItem}>
+                <button style={S.replyItemMain} onClick={() => onOpen(p)}>
+                  <PlatformChip name={p.platform} small />
+                  <span style={S.replyItemName}>{p.company}</span>
+                  {(openCard === "weekDue" || openCard === "overdue") && p.deadline && (
+                    <span style={{ ...S.replyItemDue, color: dm.color }}>{dm.n < 0 ? `${-dm.n}日超過` : dm.n === 0 ? "今日" : `あと${dm.n}日`}</span>
+                  )}
+                </button>
+                {p.replyUrl && (
+                  <a href={p.replyUrl} target="_blank" rel="noopener noreferrer" style={S.replyItemLink}>
+                    <ExternalLink size={13} strokeWidth={2.4} />開く
+                  </a>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <section>
+        <SectionHead icon={<Clock size={15} />} title="すぐ動く" sub="返信と締切が近い順" />
+        {priority.length === 0 && <Empty text="進行中の案件はありません。" />}
+        <div style={S.list}>
+          {priority.map((p) => <PriorityRow key={p.id} p={p} onOpen={onOpen} />)}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PriorityRow({ p, onOpen }) {
+  const d = dueMeta(p.deadline);
+  const replyN = replyTasksOf(p).length;
+  const open = p.tasks.filter((t) => !t.done && t.kind !== "reply").length;
+  return (
+    <button style={S.prow} onClick={() => onOpen(p)}>
+      <div style={{ ...S.prowDay, color: d.color, borderColor: d.color + "33" }}>
+        {d.n === null ? "—" : d.n < 0 ? "!" : d.n}
+        <span style={S.prowDayUnit}>{d.n === null ? "" : d.n < 0 ? "超過" : "日"}</span>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={S.prowTop}>
+          <PlatformChip name={p.platform} />
+          <span style={S.prowCompany}>{p.company}</span>
+        </div>
+        <div style={S.prowWork}>{p.work || "（業務内容未設定）"}</div>
+      </div>
+      <div style={S.prowRight}>
+        {replyN > 0 && <span style={{ ...S.replyPill, color: "#FF922B", background: "rgba(255,146,43,0.15)" }}><Reply size={12} strokeWidth={2.4} />返信{replyN}</span>}
+        {open > 0 && <span style={S.taskCount}><Circle size={11} strokeWidth={2.4} />{open}</span>}
+        <span style={{ ...S.dueText, color: d.color }}>{d.text}</span>
+        {replyN > 0 && p.replyUrl && (
+          <a href={p.replyUrl} target="_blank" rel="noopener noreferrer" style={S.openLink}
+            onClick={(e) => e.stopPropagation()} title="返信先を開く">
+            <ExternalLink size={15} strokeWidth={2.3} />
+          </a>
+        )}
+      </div>
+    </button>
+  );
+}
+
+/* ============================================================
+   案件ビュー（フィルタ + カード）
+   ============================================================ */
+function ProjectsView({ projects, onOpen }) {
+  const [fPlat, setFPlat] = useState("すべて");
+  const [fStatus, setFStatus] = useState("すべて");
+  const [fReply, setFReply] = useState(false);
+
+  const filtered = projects
+    .filter((p) => p.id !== INBOX_ID)
+    .filter((p) => fPlat === "すべて" || p.platform === fPlat)
+    .filter((p) => fStatus === "すべて" || p.status === fStatus)
+    .filter((p) => !fReply || p.reply === "要返信")
+    .sort((a, b) => {
+      const an = daysUntil(a.deadline), bn = daysUntil(b.deadline);
+      if (an === null && bn === null) return 0;
+      if (an === null) return 1; if (bn === null) return -1;
+      return an - bn;
+    });
+
+  return (
+    <div style={S.colWrap}>
+      <div style={S.filterBar}>
+        <FilterSelect value={fPlat} onChange={setFPlat} options={["すべて", ...Object.keys(PLATFORMS)]} />
+        <FilterSelect value={fStatus} onChange={setFStatus} options={["すべて", ...STATUSES]} />
+        <button onClick={() => setFReply((v) => !v)}
+          style={{ ...S.replyFilter, ...(fReply ? S.replyFilterOn : {}) }}>
+          <Reply size={13} strokeWidth={2.4} /> 要返信のみ
+        </button>
+        <span style={S.resultCount}>{filtered.length}件</span>
+      </div>
+
+      {filtered.length === 0 && <Empty text="条件に合う案件がありません。" />}
+      <div style={S.grid}>
+        {filtered.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} />)}
+      </div>
+    </div>
+  );
+}
+
+function ProjectCard({ p, onOpen }) {
+  const d = dueMeta(p.deadline);
+  const rm = REPLY_META[p.reply] || REPLY_META["なし"];
+  const done = p.tasks.filter((t) => t.done).length;
+  const total = p.tasks.length;
+  return (
+    <button style={S.card} onClick={() => onOpen(p)}>
+      <div style={{ ...S.cardBar, background: PLATFORMS[p.platform] || "#8E97A6" }} />
+      <div style={S.cardInner}>
+        <div style={S.cardHead}>
+          <PlatformChip name={p.platform} />
+          <span style={{ ...S.statusDot, color: STATUS_META[p.status] }}>● {p.status}</span>
+        </div>
+        <div style={S.cardCompany}>{p.company}</div>
+        <div style={S.cardWork}>{p.work || "（業務内容未設定）"}</div>
+
+        <div style={S.cardMeta}>
+          <span style={S.cardReward}>{yen(Number(p.reward))}</span>
+          <span style={{ ...S.cardDue, color: d.color }}>
+            <CalendarDays size={12} strokeWidth={2.2} />{d.text}
+          </span>
+        </div>
+
+        <div style={S.cardFoot}>
+          {p.reply !== "なし" && (
+            <span style={{ ...S.replyPill, color: rm.color, background: rm.bg }}>
+              <Reply size={11} strokeWidth={2.4} />{rm.label}
+            </span>
+          )}
+          {p.reply === "要返信" && p.replyUrl && (
+            <a href={p.replyUrl} target="_blank" rel="noopener noreferrer" style={S.openLinkCard}
+              onClick={(e) => e.stopPropagation()} title="返信先を開く">
+              <ExternalLink size={12} strokeWidth={2.4} />開く
+            </a>
+          )}
+          {total > 0 && (
+            <span style={S.cardTasks}>
+              <CheckCircle2 size={12} strokeWidth={2.2} color={done === total ? "#51CF66" : "#616B7A"} />
+              {done}/{total}
+            </span>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+/* ============================================================
+   タスクビュー（横タブ・横スワイプ切替・ポインタD&D）
+   ============================================================ */
+function TasksView({ projects, onToggle, onOpen, onChangeLane, onAddTask }) {
+  const [activeLane, setActiveLane] = useState("today");
+  const [overTab, setOverTab] = useState(null);
+  const [moveId, setMoveId] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [hideDone, setHideDone] = useState(false);
+  const [dragTid, setDragTid] = useState(null);
+  const [ghost, setGhost] = useState(null);
+
+  const pendRef = useRef(null);      // 押下中のタスク候補
+  const draggingRef = useRef(false); // ドラッグ確定したか
+  const overTabRef = useRef(null);
+  const swipeRef = useRef(null);
+  const activeLaneRef = useRef(activeLane);
+  useEffect(() => { activeLaneRef.current = activeLane; }, [activeLane]);
+  useEffect(() => { overTabRef.current = overTab; }, [overTab]);
+
+  // ポインタ移動・離しのグローバル監視（マウスもタッチも pointer で統一）
+  useEffect(() => {
+    const move = (e) => {
+      const pend = pendRef.current; if (!pend) return;
+      const px = e.clientX, py = e.clientY;
+      if (!draggingRef.current) {
+        if (Math.hypot(px - pend.x, py - pend.y) > 8) { draggingRef.current = true; setDragTid(pend.tid); setMoveId(null); }
+        else return;
+      }
+      setGhost({ x: px, y: py, title: pend.title });
+      const el = document.elementFromPoint(px, py);
+      const tab = el && el.closest ? el.closest("[data-lane]") : null;
+      if (tab) {
+        setOverTab(tab.getAttribute("data-lane"));   // タブの上 → そのレーン
+      } else {
+        // タブ外では横移動量で隣レーンを移動先にする（右で次・左で前）
+        const dx = px - pend.x;
+        const idx = TASK_LANES.findIndex((L) => L.key === pend.lane);
+        if (dx > 60 && idx < TASK_LANES.length - 1) setOverTab(TASK_LANES[idx + 1].key);
+        else if (dx < -60 && idx > 0) setOverTab(TASK_LANES[idx - 1].key);
+        else setOverTab(null);
+      }
+    };
+    const up = () => {
+      const pend = pendRef.current; pendRef.current = null;
+      if (draggingRef.current) {
+        draggingRef.current = false;
+        const target = overTabRef.current;
+        if (target && pend && target !== pend.lane) onChangeLane(pend.pid, pend.tid, target); // タブは切り替えず元レーンで連続仕分け
+        setDragTid(null); setGhost(null); setOverTab(null);
+      } else if (pend) {
+        setMoveId((prev) => (prev === pend.tid ? null : pend.tid)); // 動かなければタップ＝メニュー
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [onChangeLane]);
+
+  const onHandlePointerDown = (e, t) => {
+    e.preventDefault(); e.stopPropagation();
+    pendRef.current = { pid: t.project.id, tid: t.id, lane: activeLaneRef.current, x: e.clientX, y: e.clientY, title: t.title };
+  };
+
+  // コンテンツ横スワイプでタブ移動
+  const onTouchStart = (e) => {
+    if (draggingRef.current) { swipeRef.current = null; return; }
+    const tt = e.touches[0]; swipeRef.current = { x: tt.clientX, y: tt.clientY };
+  };
+  const onTouchEnd = (e) => {
+    if (draggingRef.current || !swipeRef.current) { swipeRef.current = null; return; }
+    const tt = e.changedTouches[0];
+    const dx = tt.clientX - swipeRef.current.x, dy = tt.clientY - swipeRef.current.y;
+    swipeRef.current = null;
+    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+      const idx = TASK_LANES.findIndex((L) => L.key === activeLane);
+      if (dx < 0 && idx < TASK_LANES.length - 1) setActiveLane(TASK_LANES[idx + 1].key);
+      if (dx > 0 && idx > 0) setActiveLane(TASK_LANES[idx - 1].key);
+    }
+  };
+
+  const all = [];
+  projects.forEach((p) => p.tasks.forEach((t) => all.push({ ...t, project: p })));
+  const countOf = (lane) => all.filter((t) => (t.lane || "later") === lane && !t.done).length;
+  const laneTasks = (lane) => all
+    .filter((t) => (t.lane || "later") === lane)
+    .filter((t) => !(hideDone && t.done))
+    .sort((a, b) => {
+      if (a.done !== b.done) return a.done ? 1 : -1;
+      const an = daysUntil(a.due), bn = daysUntil(b.due);
+      if (an === null && bn === null) return 0;
+      if (an === null) return 1; if (bn === null) return -1;
+      return an - bn;
+    });
+
+  const activeMeta = TASK_LANES.find((L) => L.key === activeLane) || TASK_LANES[0];
+  const items = laneTasks(activeLane);
+
+  // 案件ごとにグループ化（案件名見出し → その案件のタスク）
+  const groups = [];
+  const gmap = new Map();
+  items.forEach((t) => {
+    if (!gmap.has(t.project.id)) { const g = { project: t.project, tasks: [] }; gmap.set(t.project.id, g); groups.push(g); }
+    gmap.get(t.project.id).tasks.push(t);
+  });
+
+  return (
+    <div style={S.colWrap}>
+      {/* タブ（ドラッグ中のタスクをここに落とすと移動） */}
+      <div style={S.taskTabs}>
+        {TASK_LANES.map((L) => {
+          const active = activeLane === L.key;
+          const over = overTab === L.key;
+          return (
+            <button key={L.key} data-lane={L.key}
+              style={{ ...S.taskTab, ...(active ? S.taskTabOn : {}), ...(over ? { background: L.tint } : {}) }}
+              onClick={() => setActiveLane(L.key)}>
+              <span style={{ ...S.taskTabDot, background: L.color, opacity: active ? 1 : 0.5 }} />
+              <span>{L.label}</span>
+              <span style={{ ...S.taskTabCount, ...(active ? { background: L.color, color: "#fff" } : {}) }}>{countOf(L.key)}</span>
+              {active && <span style={{ ...S.taskTabBar, background: L.color }} />}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={S.laneBar}>
+        <span style={{ ...S.laneDot, background: activeMeta.color }} />
+        <span style={S.laneBarTitle}>{activeMeta.label}</span>
+        <button style={{ ...S.replyFilter, ...(hideDone ? S.replyFilterOn : {}) }}
+          onClick={() => setHideDone((v) => !v)}>
+          <CheckCircle2 size={13} strokeWidth={2.4} /> 完了を隠す
+        </button>
+        <button style={S.laneBarAdd} onClick={() => setAdding((v) => !v)}>
+          <Plus size={15} strokeWidth={2.6} /> 追加
+        </button>
+      </div>
+
+      {adding && (
+        <AddTaskInline projects={projects}
+          onAdd={(pid, title) => { onAddTask(pid, activeLane, title); setAdding(false); }}
+          onCancel={() => setAdding(false)} />
+      )}
+
+      <div style={S.swipeArea} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+        {items.length === 0 && !adding && <Empty text="このレーンにタスクはありません。" />}
+        {groups.map((g) => (
+          <div key={g.project.id} style={S.taskGroup}>
+            <button style={S.taskGroupHead}
+              onClick={() => { if (g.project.id !== INBOX_ID) onOpen(g.project); }}>
+              <PlatformChip name={g.project.platform} small />
+              <span style={S.taskGroupName}>{g.project.company}</span>
+              <span style={S.taskGroupCount}>{g.tasks.filter((t) => !t.done).length}</span>
+            </button>
+            <div style={S.list}>
+              {g.tasks.map((t) => (
+                <TaskCard key={t.id} t={t} lane={activeLane}
+                  onToggle={onToggle} onOpen={onOpen}
+                  dragging={dragTid === t.id}
+                  moveOpen={moveId === t.id}
+                  onHandlePointerDown={onHandlePointerDown}
+                  onMove={(lane) => { onChangeLane(t.project.id, t.id, lane); setMoveId(null); }} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {ghost && (
+        <div style={{ ...S.ghost, left: ghost.x + 10, top: ghost.y + 10 }}>{ghost.title || "（無題）"}</div>
+      )}
+    </div>
+  );
+}
+
+function TaskCard({ t, lane, onToggle, onOpen, dragging, moveOpen, onHandlePointerDown, onMove }) {
+  const d = dueMeta(t.due);
+  return (
+    <div style={{ ...S.tcard, ...(t.done ? S.tcardDone : {}), ...(dragging ? S.tcardDragging : {}) }}>
+      <button style={S.checkBtn} onClick={() => onToggle(t.project.id, t.id)}>
+        {t.done ? <CheckCircle2 size={18} color="#51CF66" strokeWidth={2.2} />
+                : <Circle size={18} color="#3A434F" strokeWidth={2.2} />}
+      </button>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ ...S.tcardTitle, ...(t.done ? S.trowDone : {}) }}>
+          {t.kind === "reply" && <Reply size={13} color="#FF922B" strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-1px" }} />}
+          {t.title || "（無題）"}
+        </div>
+        <div style={S.tcardMeta}>
+          <button style={S.tcardProject} onClick={() => { if (t.project.id !== INBOX_ID) onOpen(t.project); }}>
+            <PlatformChip name={t.project.platform} small />
+            <span style={S.tcardCompany}>{t.project.company}</span>
+          </button>
+          {t.kind === "reply" && !t.done && <span style={{ ...S.dueMini, color: "#FF922B" }}>本日中</span>}
+          {t.kind !== "reply" && t.due && !t.done && <span style={{ ...S.dueMini, color: d.color }}>{d.text}</span>}
+        </div>
+      </div>
+      <div style={S.moveWrap}>
+        <button style={S.moveBtn} onPointerDown={(e) => onHandlePointerDown(e, t)}
+          title="ドラッグで移動 / タップでメニュー">
+          <GripVertical size={16} color="#5E6675" />
+        </button>
+        {moveOpen && (
+          <>
+            <div style={S.movePopScrim} onClick={() => onMove(lane)} />
+            <div style={S.movePop}>
+              {TASK_LANES.filter((x) => x.key !== lane).map((x) => (
+                <button key={x.key} style={S.moveItem} onClick={() => onMove(x.key)}>
+                  <span style={{ ...S.laneDot, background: x.color }} />{x.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AddTaskInline({ projects, onAdd, onCancel }) {
+  const [title, setTitle] = useState("");
+  const [pid, setPid] = useState(projects[0]?.id || "");
+  if (projects.length === 0) return <div style={S.laneEmpty}>先に案件を追加してください</div>;
+  const submit = () => { if (title.trim() && pid) onAdd(pid, title.trim()); };
+  return (
+    <div style={S.addInline}>
+      <input autoFocus style={S.addInlineInput} value={title} placeholder="やること"
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") onCancel(); }} />
+      <select style={S.addInlineSelect} value={pid} onChange={(e) => setPid(e.target.value)}>
+        {projects.map((p) => <option key={p.id} value={p.id}>{p.company || "（無題案件）"}</option>)}
+      </select>
+      <div style={S.addInlineBtns}>
+        <button style={S.addInlineCancel} onClick={onCancel}>キャンセル</button>
+        <button style={S.addInlineAdd} onClick={submit}>追加</button>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   詳細・編集ドロワー
+   ============================================================ */
+function Drawer({ draft, onClose, onSave, onDelete, confirmDel, onConfirmDelete, onCancelDelete }) {
+  const [d, setD] = useState(draft);
+  const [generating, setGenerating] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [parsing, setParsing] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const [parseMsg, setParseMsg] = useState("");
+  const [pendingDiff, setPendingDiff] = useState([]); // [{field,label,current,next,display}]
+  const [genError, setGenError] = useState("");
+  const [extractMsg, setExtractMsg] = useState("");
+  const [copied, setCopied] = useState(false);
+  const isNew = !draft.company && draft.tasks.length === 0;
+  const set = (k, v) => setD((p) => ({ ...p, [k]: v }));
+
+  async function parseProject() {
+    if (!pasteText.trim()) { setParseMsg("案件情報を貼り付けてください。"); return; }
+    setParsing(true); setParseMsg(""); setPendingDiff([]);
+    try {
+      const text = await callClaude({
+        maxTokens: 600,
+        system: "あなたは案件情報を構造化するアシスタントです。貼り付けられた募集文・案件情報から、以下のJSONだけを出力します。説明やコードブロック記法は付けないこと。\n{\"company\":\"会社名/クライアント名\",\"platform\":\"クラウドワークス|ランサーズ|ココナラ|直契約|その他 のいずれか\",\"work\":\"業務内容の要約\",\"reward\":数値（報酬の円。範囲なら下限。不明は0）,\"deadline\":\"YYYY-MM-DD（納期。不明は空文字）\",\"replyUrl\":\"応募/メッセージのURL。無ければ空文字\"}\n判断できない項目は空文字または0にする。",
+        user: pasteText.slice(0, 4000),
+      });
+      let obj = {};
+      try { obj = JSON.parse(text.replace(/```json|```/g, "").trim()); } catch { obj = {}; }
+      const plat = Object.keys(PLATFORMS).includes(obj.platform) ? obj.platform : (obj.platform ? "その他" : "");
+      const parsed = {
+        company: obj.company || "",
+        platform: plat,
+        work: obj.work || "",
+        reward: obj.reward ? String(obj.reward) : "",
+        deadline: /^\d{4}-\d{2}-\d{2}$/.test(obj.deadline || "") ? obj.deadline : "",
+        replyUrl: obj.replyUrl || "",
+      };
+      const labels = { company: "会社名", platform: "契約先", work: "業務内容", reward: "報酬", deadline: "納期", replyUrl: "返信先URL" };
+      const autoFill = {};   // 空欄に入れる
+      const diffs = [];      // 既存値と異なる（確認が必要）
+      Object.keys(parsed).forEach((f) => {
+        const nv = parsed[f];
+        if (!nv) return;                       // 抽出できなかった項目は無視
+        const cur = (d[f] || "").toString();
+        if (!cur) { autoFill[f] = nv; }        // 現在が空 → 自動で埋める
+        else if (cur !== nv && !(f === "platform" && nv === "その他")) {
+          diffs.push({ field: f, label: labels[f], current: cur, next: nv });
+        }
+      });
+      if (Object.keys(autoFill).length) setD((p) => ({ ...p, ...autoFill }));
+      setPendingDiff(diffs);
+      if (diffs.length) setParseMsg(`${Object.keys(autoFill).length}項目を入力。${diffs.length}項目は既存の値と異なります（下で確認）。`);
+      else setParseMsg(`${Object.keys(autoFill).length}項目を読み取って入力しました。内容を確認して保存してください。`);
+    } catch {
+      setParseMsg("読み取りに失敗しました。通信状況・APIキー設定をご確認ください。");
+    } finally { setParsing(false); }
+  }
+
+  const applyDiff = (f) => {
+    const item = pendingDiff.find((x) => x.field === f);
+    if (item) set(f, item.next);
+    setPendingDiff((arr) => arr.filter((x) => x.field !== f));
+  };
+  const applyAllDiff = () => {
+    setD((p) => { const n = { ...p }; pendingDiff.forEach((x) => { n[x.field] = x.next; }); return n; });
+    setPendingDiff([]);
+  };
+
+  const addTask = () => set("tasks", [...d.tasks, { id: uid(), title: "", done: false, due: "", lane: "later", kind: "task" }]);
+  const setTask = (id, k, v) => set("tasks", d.tasks.map((t) => t.id === id ? { ...t, [k]: v } : t));
+  const delTask = (id) => set("tasks", d.tasks.filter((t) => t.id !== id));
+
+  async function generateReply() {
+    if (!d.received.trim()) { setGenError("先に相手から届いたメッセージを貼り付けてください。"); return; }
+    setGenerating(true); setGenError("");
+    try {
+      const text = await callClaude({
+        maxTokens: 1200,
+        system: "あなたはフリーランス「インフォサクセスの高崎」のアシスタントです。受け取ったメッセージへの返信文を、高崎本人が送る前提で作成します。丁寧でビジネスライクな日本語。\n\n【重要】メッセージに複数の用件・質問・依頼が含まれている場合は、そのすべてに漏れなく一通の返信で答えること。論点が複数あるときは、相手が読みやすいよう、必要に応じて改行や箇条書き（「・」）で整理して、どの用件への回答かが明確に分かるようにする。確認が必要な点や即答できない点は、憶測で埋めず「確認のうえ改めてご連絡します」等と添える。\n\n出力はそのまま送れる返信本文のみ。マークダウンの見出し記法や「返信案：」等の前置き・署名は付けない。",
+        user: `# 案件情報\n会社/クライアント: ${d.company || "（未設定）"}\n契約先: ${d.platform}\n業務内容: ${d.work || "（未設定）"}\nメモ: ${d.note || "（なし）"}\n\n# 相手から届いたメッセージ（複数の用件が含まれる場合があります）\n${d.received}\n\n上記メッセージのすべての用件に漏れなく答える返信文を作成してください。`,
+      });
+      set("replyDraft", text || "(生成できませんでした。もう一度お試しください)");
+    } catch {
+      setGenError("生成に失敗しました。通信状況・APIキー設定をご確認ください。");
+    } finally { setGenerating(false); }
+  }
+
+  async function extractTasks() {
+    if (!d.received.trim()) { setGenError("先に相手から届いたメッセージを貼り付けてください。"); return; }
+    setExtracting(true); setGenError(""); setExtractMsg("");
+    try {
+      const text = await callClaude({
+        maxTokens: 500,
+        system: "あなたはフリーランスのアシスタントです。届いたメッセージから、こちらが対応すべき『やるべきこと』を具体的なタスクに分解します。各タスクは短い命令形の日本語（例：見積りを作成する）。出力はJSON配列のみ（例：[\"見積りを作成する\",\"納期を回答する\"]）。前置き・説明・コードブロック記法は一切付けない。やるべきことが無ければ [] のみ。",
+        user: `# 案件\n会社: ${d.company || "（未設定）"}\n業務: ${d.work || "（未設定）"}\n\n# 届いたメッセージ\n${d.received}`,
+      });
+      let arr = [];
+      try { arr = JSON.parse(text.replace(/```json|```/g, "").trim()); } catch { arr = []; }
+      const titles = Array.isArray(arr) ? arr.filter((x) => typeof x === "string" && x.trim()) : [];
+      if (titles.length) {
+        const newTasks = titles.map((title) => ({ id: uid(), title: title.trim(), done: false, due: "", lane: "today", kind: "task" }));
+        set("tasks", [...d.tasks, ...newTasks]);
+        setExtractMsg(`${titles.length}件のタスクを追加しました（「今日」レーン）。`);
+      } else {
+        setExtractMsg("対応が必要なタスクは見つかりませんでした。");
+      }
+    } catch {
+      setGenError("タスク抽出に失敗しました。通信状況・APIキー設定をご確認ください。");
+    } finally { setExtracting(false); }
+  }
+
+  function copyReply() {
+    const t = d.replyDraft || "";
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800); }).catch(() => {});
+    }
+  }
+
+  function markReplied() {
+    setD((p) => ({ ...p, reply: "返信済み", repliedAt: Date.now() }));
+  }
+
+  const repliedLabel = d.repliedAt
+    ? new Date(d.repliedAt).toLocaleString("ja-JP", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    : null;
+
+  // 端を内側にスワイプ（横方向に大きく動かす）と閉じる
+  const swipe = useRef({ x: 0, y: 0, t: 0 });
+  const [dragX, setDragX] = useState(0);
+  const onDrawerTouchStart = (e) => {
+    const t = e.touches[0];
+    swipe.current = { x: t.clientX, y: t.clientY, t: Date.now() };
+    setDragX(0);
+  };
+  const onDrawerTouchMove = (e) => {
+    const t = e.touches[0];
+    const dx = t.clientX - swipe.current.x;
+    const dy = t.clientY - swipe.current.y;
+    if (dx > 0 && Math.abs(dx) > Math.abs(dy)) setDragX(dx);
+  };
+  const onDrawerTouchEnd = (e) => {
+    const t = (e.changedTouches && e.changedTouches[0]) || null;
+    if (!t) { setDragX(0); return; }
+    const dx = t.clientX - swipe.current.x;
+    const dy = t.clientY - swipe.current.y;
+    const fast = Date.now() - swipe.current.t < 500;
+    if (dx > 90 && Math.abs(dx) > Math.abs(dy) * 1.4 && (dx > 150 || fast)) onClose();
+    else setDragX(0);
+  };
+
+  return (
+    <>
+      <div style={S.scrim} onClick={onClose} />
+      <aside style={{ ...S.drawer, ...(dragX ? { transform: `translateX(${dragX}px)`, transition: "none" } : {}) }}
+        onTouchStart={onDrawerTouchStart} onTouchMove={onDrawerTouchMove} onTouchEnd={onDrawerTouchEnd}>
+        <div style={S.drawerHead}>
+          <span style={S.drawerTitle}>{isNew ? "案件を追加" : "案件の詳細"}</span>
+          <button style={S.iconBtn} onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <div style={S.drawerBody}>
+          <div style={S.parseBox}>
+            <div style={S.parseBoxHead}>
+              <Sparkles size={14} color={C.accent} strokeWidth={2.3} />
+              <span style={S.parseBoxTitle}>貼り付けて{isNew ? "自動入力" : "再読み取り"}</span>
+            </div>
+            <div style={S.parseHint}>
+              {isNew
+                ? "募集文や案件情報を貼り付けると、会社名・契約先・業務・報酬・期限などを読み取って下に入力します。"
+                : "更新された案件情報を貼り付けて読み取れます。空欄は自動で入力し、既存の値と異なる項目は上書き前に確認します。"}
+            </div>
+            <textarea style={{ ...S.input, minHeight: 70, resize: "vertical" }} value={pasteText}
+              placeholder="募集文・メッセージなどをそのまま貼り付け"
+              onChange={(e) => setPasteText(e.target.value)} />
+            <button style={{ ...S.genBtn, ...(parsing ? S.genBtnBusy : {}) }} onClick={parseProject} disabled={parsing}>
+              {parsing ? <><span style={S.spinner} />読み取り中…</> : <><Sparkles size={14} strokeWidth={2.4} />読み取って入力</>}
+            </button>
+            {parseMsg && <div style={S.extractMsg}>{parseMsg}</div>}
+
+            {pendingDiff.length > 0 && (
+              <div style={S.diffBox}>
+                <div style={S.diffHead}>
+                  <AlertTriangle size={13} color="#FF922B" strokeWidth={2.4} />
+                  <span style={S.diffTitle}>既存の値と異なります</span>
+                  <button style={S.diffApplyAll} onClick={applyAllDiff}>すべて更新</button>
+                </div>
+                {pendingDiff.map((x) => (
+                  <div key={x.field} style={S.diffRow}>
+                    <div style={S.diffRowTop}>
+                      <span style={S.diffLabel}>{x.label}</span>
+                      <button style={S.diffApply} onClick={() => applyDiff(x.field)}>更新</button>
+                    </div>
+                    <div style={S.diffVals}>
+                      <span style={S.diffCur}>{x.current || "（空）"}</span>
+                      <ChevronRight size={13} color={C.ink3} />
+                      <span style={S.diffNext}>{x.next}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <Field label="会社名 / クライアント">
+            <input style={S.input} value={d.company} placeholder="例：水上工芸"
+              onChange={(e) => set("company", e.target.value)} />
+          </Field>
+
+          <div style={S.row2}>
+            <Field label="契約先">
+              <select style={S.input} value={d.platform} onChange={(e) => set("platform", e.target.value)}>
+                {Object.keys(PLATFORMS).map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </Field>
+            <Field label="報酬（円）">
+              <input style={S.input} type="number" value={d.reward} placeholder="0"
+                onChange={(e) => set("reward", e.target.value)} />
+            </Field>
+          </div>
+
+          <Field label="業務内容">
+            <textarea style={{ ...S.input, minHeight: 56, resize: "vertical" }} value={d.work}
+              placeholder="例：コーポレートサイト制作（Next.js）"
+              onChange={(e) => set("work", e.target.value)} />
+          </Field>
+
+          <div style={S.row2}>
+            <Field label="ステータス">
+              <select style={S.input} value={d.status} onChange={(e) => set("status", e.target.value)}>
+                {STATUSES.map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </Field>
+            <Field label="返信状況">
+              <select style={S.input} value={d.reply} onChange={(e) => set("reply", e.target.value)}>
+                {REPLIES.map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </Field>
+          </div>
+
+          <Field label="期限">
+            <input style={S.input} type="date" value={d.deadline}
+              onChange={(e) => set("deadline", e.target.value)} />
+          </Field>
+
+          <Field label="メモ">
+            <textarea style={{ ...S.input, minHeight: 48, resize: "vertical" }} value={d.note}
+              placeholder="補足・連絡事項など"
+              onChange={(e) => set("note", e.target.value)} />
+          </Field>
+
+          {/* ===== やり取り（AI返信案） ===== */}
+          <div style={S.replyBlock}>
+            <div style={S.replyBlockHead}>
+              <Sparkles size={14} color={C.accent} strokeWidth={2.3} />
+              <span style={S.replyBlockTitle}>返信アシスト</span>
+              {repliedLabel && (
+                <span style={S.repliedBadge}><Check size={11} strokeWidth={3} />{repliedLabel} 返信済み</span>
+              )}
+            </div>
+
+            <Field label="相手から届いたメッセージ">
+              <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={d.received}
+                placeholder="Chatworkやクラウドワークスで届いた本文を貼り付け"
+                onChange={(e) => set("received", e.target.value)} />
+            </Field>
+
+            <Field label="返信先URL">
+              <input style={S.input} value={d.replyUrl} type="url"
+                placeholder={urlHint(d.platform)}
+                onChange={(e) => set("replyUrl", e.target.value)} />
+            </Field>
+            {d.replyUrl && (
+              <a href={d.replyUrl} target="_blank" rel="noopener noreferrer" style={S.openDestBtn}>
+                <ExternalLink size={14} strokeWidth={2.4} />返信先を開く
+              </a>
+            )}
+
+            <div style={S.assistBtnRow}>
+              <button style={{ ...S.genBtn, ...(generating ? S.genBtnBusy : {}) }} onClick={generateReply} disabled={generating || extracting}>
+                {generating ? <><span style={S.spinner} />生成中…</> : <><Sparkles size={14} strokeWidth={2.4} />返信案を生成</>}
+              </button>
+              <button style={{ ...S.extractBtn, ...(extracting ? S.genBtnBusy : {}) }} onClick={extractTasks} disabled={generating || extracting}>
+                {extracting ? <><span style={S.spinnerDark} />抽出中…</> : <><ListPlus size={14} strokeWidth={2.4} />やることを抽出</>}
+              </button>
+            </div>
+            <div style={S.assistNote}>メッセージに用件が複数あっても、すべてに漏れなく答える1通の返信案を作成します。「やることを抽出」は対応すべきことをタスク化します。</div>
+            {extractMsg && <div style={S.extractMsg}>{extractMsg}</div>}
+            {genError && <div style={S.genError}>{genError}</div>}
+
+            {d.replyDraft && (
+              <div style={S.replyResult}>
+                <div style={S.replyResultHead}>
+                  <span style={S.fieldLabel}>送信メッセージ案</span>
+                  <button style={S.copyBtn} onClick={copyReply}>
+                    {copied ? <><Check size={12} strokeWidth={3} />コピー済み</> : <><Copy size={12} strokeWidth={2.4} />コピー</>}
+                  </button>
+                </div>
+                <textarea style={{ ...S.input, minHeight: 110, resize: "vertical", lineHeight: 1.6 }} value={d.replyDraft}
+                  onChange={(e) => set("replyDraft", e.target.value)} />
+                <button style={S.repliedBtn} onClick={markReplied}>
+                  <CheckCircle2 size={15} strokeWidth={2.4} />送信した（返信済みにする）
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* ===== tasks ===== */}
+          <div style={S.taskBlockHead}>
+            <span style={S.fieldLabel}>タスク</span>
+            <button style={S.addTaskBtn} onClick={addTask}><Plus size={13} strokeWidth={2.6} />追加</button>
+          </div>
+          <div style={S.taskEditList}>
+            {d.tasks.length === 0 && <div style={S.taskEmpty}>タスクはまだありません</div>}
+            {d.tasks.map((t) => (
+              <div key={t.id} style={S.taskEditRow}>
+                <button style={S.checkBtn} onClick={() => setTask(t.id, "done", !t.done)}>
+                  {t.done ? <CheckCircle2 size={18} color="#51CF66" /> : <Circle size={18} color="#3A434F" />}
+                </button>
+                <input style={{ ...S.taskInput, ...(t.done ? S.trowDone : {}) }} value={t.title}
+                  placeholder="やること" onChange={(e) => setTask(t.id, "title", e.target.value)} />
+                <input style={S.taskDate} type="date" value={t.due}
+                  onChange={(e) => setTask(t.id, "due", e.target.value)} />
+                <button style={S.iconBtnSm} onClick={() => delTask(t.id)}><Trash2 size={14} color="#616B7A" /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={S.drawerFoot}>
+          {!isNew && (
+            confirmDel === d.id ? (
+              <div style={S.delConfirm}>
+                <span style={S.delText}>削除しますか？</span>
+                <button style={S.delYes} onClick={() => onConfirmDelete(d.id)}>削除</button>
+                <button style={S.delNo} onClick={onCancelDelete}>戻る</button>
+              </div>
+            ) : (
+              <button style={S.delBtn} onClick={() => onDelete(d.id)}><Trash2 size={15} />削除</button>
+            )
+          )}
+          <div style={{ flex: 1 }} />
+          <button style={S.cancelBtn} onClick={onClose}>キャンセル</button>
+          <button style={S.saveBtn} onClick={() => onSave(d)}>保存</button>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+/* ============================================================
+   設定モーダル（APIキー）
+   ============================================================ */
+function SettingsModal({ onClose }) {
+  const [key, setKey] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try { const r = await window.storage.get("cockpit:apikey"); setKey((r && r.value) || ""); } catch {}
+      setLoaded(true);
+    })();
+  }, []);
+
+  const save = async () => {
+    try { await window.storage.set("cockpit:apikey", key.trim()); setSaved(true); setTimeout(() => setSaved(false), 1600); } catch {}
+  };
+
+  return (
+    <>
+      <div style={S.scrim} onClick={onClose} />
+      <div style={S.modal}>
+        <div style={S.modalHead}>
+          <span style={S.drawerTitle}>設定</span>
+          <button style={S.iconBtn} onClick={onClose}><X size={18} /></button>
+        </div>
+        <div style={S.modalBody}>
+          <div style={S.settingNote}>
+            返信案の生成・タスク抽出に使います。ブラウザでこのHTMLを直接開いた場合は、ご自身のAnthropic APIキーが必要です（Claudeアプリ内のプレビューでは未入力でも動作します）。
+          </div>
+          <Field label="Anthropic APIキー">
+            <input style={S.input} type="password" value={key} placeholder="sk-ant-..."
+              onChange={(e) => setKey(e.target.value)} />
+          </Field>
+          <div style={S.settingWarn}>キーはこのブラウザ内にのみ保存され、Anthropic API以外には送信されません。共用端末では入力しないでください。</div>
+          <button style={S.saveBtn} onClick={save} disabled={!loaded}>{saved ? "保存しました" : "保存"}</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ============================================================
+   カレンダービュー（タスク期限・案件納期を月表示）
+   ============================================================ */
+function CalendarView({ projects, onOpen }) {
+  const now = new Date();
+  const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() });
+  const pad = (n) => String(n).padStart(2, "0");
+  const key = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
+  const todayKey = key(now.getFullYear(), now.getMonth(), now.getDate());
+  const [selected, setSelected] = useState(todayKey);
+
+  const byDate = {};
+  const push = (k, item) => { (byDate[k] = byDate[k] || []).push(item); };
+  projects.forEach((p) => {
+    (p.tasks || []).forEach((t) => { if (t.due && !t.done) push(t.due, { kind: "task", label: t.title, color: TASK_LANES.find((L) => L.key === (t.lane || "later"))?.color || "#9AA4B2", project: p }); });
+    if (p.deadline && p.id !== INBOX_ID && p.status !== "完了") push(p.deadline, { kind: "deadline", label: `${p.company}：納期`, color: "#FF6B6B", project: p });
+  });
+
+  const startDow = new Date(ym.y, ym.m, 1).getDay();
+  const daysInMonth = new Date(ym.y, ym.m + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < startDow; i++) cells.push(null);
+  for (let dd = 1; dd <= daysInMonth; dd++) cells.push(dd);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const prevM = () => setYm((s) => (s.m === 0 ? { y: s.y - 1, m: 11 } : { y: s.y, m: s.m - 1 }));
+  const nextM = () => setYm((s) => (s.m === 11 ? { y: s.y + 1, m: 0 } : { y: s.y, m: s.m + 1 }));
+  const goToday = () => { setYm({ y: now.getFullYear(), m: now.getMonth() }); setSelected(todayKey); };
+
+  const WD = ["日", "月", "火", "水", "木", "金", "土"];
+  const selItems = byDate[selected] || [];
+  const sd = selected ? new Date(selected + "T00:00:00") : null;
+  const selLabel = sd ? `${sd.getMonth() + 1}月${sd.getDate()}日（${WD[sd.getDay()]}）` : "";
+
+  return (
+    <div style={S.colWrap}>
+      <div style={S.calBar}>
+        <button style={S.calNav} onClick={prevM}><ChevronLeft size={18} /></button>
+        <span style={S.calTitle}>{ym.y}年 {ym.m + 1}月</span>
+        <button style={S.calNav} onClick={nextM}><ChevronRight size={18} /></button>
+        <button style={S.calToday} onClick={goToday}>今日</button>
+      </div>
+
+      <div style={S.calGrid}>
+        {WD.map((w, i) => (
+          <div key={w} style={{ ...S.calWd, color: i === 0 ? "#FF6B6B" : i === 6 ? "#2DD4BF" : C.ink3 }}>{w}</div>
+        ))}
+        {cells.map((dd, i) => {
+          if (dd === null) return <div key={i} style={S.calCellEmpty} />;
+          const k = key(ym.y, ym.m, dd);
+          const items = byDate[k] || [];
+          const isToday = k === todayKey;
+          const isSel = k === selected;
+          const dow = i % 7;
+          const dots = [...new Set(items.map((it) => it.color))].slice(0, 4);
+          return (
+            <button key={i} onClick={() => setSelected(k)}
+              style={{ ...S.calCell, ...(isSel ? S.calCellSel : {}) }}>
+              <span style={{ ...S.calDay, color: isToday ? "#fff" : dow === 0 ? "#FF6B6B" : dow === 6 ? "#2DD4BF" : C.ink, ...(isToday ? S.calDayToday : {}) }}>{dd}</span>
+              <span style={S.calDots}>
+                {dots.map((c, j) => <span key={j} style={{ ...S.calDot, background: c }} />)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={S.calDetail}>
+        <div style={S.calDetailHead}>
+          <CalendarDays size={15} color={C.accent} strokeWidth={2.2} />
+          <span style={S.calDetailDate}>{selLabel}</span>
+          <span style={S.calDetailCount}>{selItems.length}件</span>
+        </div>
+        {selItems.length === 0 && <div style={S.calDetailEmpty}>予定はありません。</div>}
+        {selItems.map((it, j) => (
+          <button key={j} style={S.calDetailItem} onClick={() => it.project.id !== INBOX_ID && onOpen(it.project)}>
+            <span style={{ ...S.calDetailBar, background: it.color }} />
+            <span style={S.calDetailLabel}>{it.label}</span>
+            <span style={{ ...S.calDetailKind, color: it.color }}>{it.kind === "deadline" ? "納期" : "タスク"}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   小物コンポーネント
+   ============================================================ */
+function PlatformChip({ name, small }) {
+  const c = PLATFORMS[name] || "#8E97A6";
+  return (
+    <span style={{
+      ...S.chip, color: c, background: c + "16",
+      fontSize: small ? 10 : 11, padding: small ? "1px 6px" : "2px 8px",
+    }}>{name}</span>
+  );
+}
+function SectionHead({ icon, title, sub }) {
+  return (
+    <div style={S.sectionHead}>
+      <span style={S.sectionIcon}>{icon}</span>
+      <span style={S.sectionTitle}>{title}</span>
+      <span style={S.sectionSub}>{sub}</span>
+    </div>
+  );
+}
+function FilterSelect({ value, onChange, options }) {
+  return (
+    <select style={S.filterSelect} value={value} onChange={(e) => onChange(e.target.value)}>
+      {options.map((o) => <option key={o}>{o}</option>)}
+    </select>
+  );
+}
+function Field({ label, children }) {
+  return (<label style={S.field}><span style={S.fieldLabel}>{label}</span>{children}</label>);
+}
+function Empty({ text }) {
+  return (<div style={S.emptyBox}><Inbox size={26} color="#3A434F" strokeWidth={1.8} /><span>{text}</span></div>);
+}
+function urlHint(platform) {
+  switch (platform) {
+    case "クラウドワークス": return "クラウドワークスのメッセージページのURL";
+    case "ランサーズ": return "ランサーズのメッセージページのURL";
+    case "ココナラ": return "ココナラのトークルームのURL";
+    default: return "ChatworkルームのURL / メールスレッドのURL など";
+  }
+}
+function blankDraft() {
+  return { id: uid(), company: "", platform: "クラウドワークス", work: "", reward: "",
+    status: "進行中", reply: "なし", deadline: "", note: "",
+    received: "", replyDraft: "", repliedAt: null, replyUrl: "", tasks: [] };
+}
+function Fonts() {
+  return (<style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { color: #E8ECF2; }
+    button { cursor: pointer; font-family: inherit; }
+    input, select, textarea { font-family: inherit; outline: none; color: #E8ECF2; background: #212834; }
+    input::placeholder, textarea::placeholder { color: #616B7A; }
+    select option { background: #212834; color: #E8ECF2; }
+    ::-webkit-scrollbar { width: 9px; height: 9px; }
+    ::-webkit-scrollbar-thumb { background: #333B46; border-radius: 6px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  `}</style>);
+}
+
+/* ============================================================
+   スタイル
+   ============================================================ */
+const F = {
+  disp: "'Space Grotesk', 'Noto Sans JP', sans-serif",
+  body: "'Noto Sans JP', system-ui, sans-serif",
+};
+const C = {
+  bg: "#0F1318", panel: "#181D25", panel2: "#212834",
+  ink: "#E8ECF2", ink2: "#9AA4B2", ink3: "#616B7A",
+  line: "#2A323D", accent: "#6B8AFF",
+};
+const S = {
+  shell: { minHeight: "100vh", background: C.bg, fontFamily: F.body, color: C.ink },
+  center: { display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" },
+
+  header: {
+    position: "sticky", top: 0, zIndex: 20, display: "flex", alignItems: "center", gap: 14,
+    padding: "12px 20px", background: "rgba(15,19,24,0.82)", backdropFilter: "blur(10px)",
+    borderBottom: `1px solid ${C.line}`, flexWrap: "wrap",
+  },
+  brand: { display: "flex", alignItems: "center", gap: 10, marginRight: "auto" },
+  brandMark: {
+    width: 34, height: 34, borderRadius: 9, background: C.accent, color: "#fff",
+    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14,
+  },
+  brandTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 16, letterSpacing: 0.2, lineHeight: 1.1 },
+  brandSub: { fontSize: 12, color: C.ink3, marginTop: 2 },
+
+  tabs: { display: "flex", gap: 4, background: C.panel2, padding: 4, borderRadius: 12, border: `1px solid ${C.line}` },
+  tab: {
+    display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent",
+    color: C.ink3, width: 54, height: 44, borderRadius: 10, transition: "color 0.12s, background 0.12s",
+  },
+  tabOn: { background: C.panel, color: C.accent, boxShadow: "0 1px 3px rgba(0,0,0,0.35)" },
+  tabLabel: {},
+
+  addBtn: {
+    display: "flex", alignItems: "center", gap: 6, border: "none", background: C.accent,
+    color: "#fff", fontSize: 14, fontWeight: 700, padding: "9px 14px", borderRadius: 10,
+  },
+  addLabel: {},
+
+  main: { padding: "20px 16px 64px", maxWidth: 1120, margin: "0 auto" },
+  colWrap: { display: "flex", flexDirection: "column", gap: 22 },
+
+  /* KPI */
+  /* reply panel (要返信一覧) */
+  parseBox: { background: "rgba(107,138,255,0.08)", border: "1px solid rgba(107,138,255,0.3)", borderRadius: 12, padding: 13, display: "flex", flexDirection: "column", gap: 10 },
+  parseBoxHead: { display: "flex", alignItems: "center", gap: 7 },
+  parseBoxTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 14.5, color: C.ink },
+  parseHint: { fontSize: 12.5, color: C.ink2, lineHeight: 1.55 },
+  diffBox: { background: "rgba(255,146,43,0.08)", border: "1px solid rgba(255,146,43,0.35)", borderRadius: 10, padding: 11, display: "flex", flexDirection: "column", gap: 9 },
+  diffHead: { display: "flex", alignItems: "center", gap: 6 },
+  diffTitle: { fontSize: 12.5, fontWeight: 700, color: C.ink },
+  diffApplyAll: { marginLeft: "auto", border: "none", background: "#FF922B", color: "#1A1208", borderRadius: 7, padding: "4px 11px", fontSize: 12, fontWeight: 700 },
+  diffRow: { display: "flex", flexDirection: "column", gap: 4, background: C.panel2, borderRadius: 8, padding: "8px 10px" },
+  diffRowTop: { display: "flex", alignItems: "center", gap: 8 },
+  diffLabel: { fontSize: 12, fontWeight: 700, color: C.ink2 },
+  diffApply: { marginLeft: "auto", border: `1px solid ${C.line}`, background: C.panel, color: C.ink, borderRadius: 6, padding: "3px 11px", fontSize: 11.5, fontWeight: 700 },
+  diffVals: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
+  diffCur: { fontSize: 12.5, color: C.ink3, textDecoration: "line-through" },
+  diffNext: { fontSize: 12.5, color: "#FF922B", fontWeight: 700 },
+  replyPanel: { background: C.panel, border: "1px solid rgba(255,146,43,0.4)", borderRadius: 14, padding: 12, display: "flex", flexDirection: "column", gap: 8 },
+  replyPanelHead: { display: "flex", alignItems: "center", gap: 8, paddingBottom: 4 },
+  replyPanelDot: { width: 9, height: 9, borderRadius: "50%", flexShrink: 0 },
+  replyPanelNum: { fontFamily: F.disp, fontSize: 12.5, fontWeight: 700, color: C.ink3, marginLeft: "auto" },
+  replyItemDue: { fontSize: 11.5, fontWeight: 700, flexShrink: 0, marginLeft: 2 },
+  replyPanelTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 14.5, color: C.ink },
+  replyPanelClose: { marginLeft: 4, border: "none", background: "transparent", color: C.ink3, display: "flex", padding: 2 },
+  replyPanelEmpty: { fontSize: 14.5, color: C.ink3, padding: "6px 2px" },
+  replyItem: { display: "flex", alignItems: "center", gap: 8, background: C.panel2, borderRadius: 10, padding: "9px 11px" },
+  replyItemMain: { flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8, border: "none", background: "transparent", padding: 0, textAlign: "left" },
+  replyItemCol: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 },
+  replyItemSub: { fontSize: 12, color: C.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  replyItemName: { fontWeight: 700, fontSize: 14, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  replyItemLink: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14.5, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.16)", padding: "5px 10px", borderRadius: 8, textDecoration: "none", flexShrink: 0 },
+
+  kpiRow: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(158px, 1fr))", gap: 12 },
+  kpiCard: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "16px 17px", textAlign: "left", width: "100%" },
+  kpiCardBtn: { cursor: "pointer" },
+  kpiHint: { display: "block", marginTop: 6, fontSize: 11, color: C.ink3, fontWeight: 600 },
+  kpiTop: { display: "flex", alignItems: "center", justifyContent: "space-between" },
+  kpiLabel: { fontSize: 13.5, color: C.ink2, fontWeight: 600 },
+  kpiValue: { fontFamily: F.disp, fontWeight: 700, marginTop: 8, lineHeight: 1, fontVariantNumeric: "tabular-nums" },
+  kpiUnit: { fontSize: 14, marginLeft: 3, fontWeight: 500 },
+
+  /* section */
+  sectionHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 12 },
+  sectionIcon: { color: C.ink2, display: "flex" },
+  sectionTitle: { fontFamily: F.disp, fontSize: 15, fontWeight: 700 },
+  sectionSub: { fontSize: 14.5, color: C.ink3 },
+
+  /* priority list */
+  list: { display: "flex", flexDirection: "column", gap: 10 },
+  prow: {
+    display: "flex", alignItems: "center", gap: 14, width: "100%", textAlign: "left",
+    background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "14px 15px",
+  },
+  prowDay: {
+    width: 46, height: 46, borderRadius: 11, border: "1.5px solid", flexShrink: 0,
+    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+    fontFamily: F.disp, fontWeight: 700, fontSize: 19, fontVariantNumeric: "tabular-nums", lineHeight: 1,
+  },
+  prowDayUnit: { fontSize: 8.5, fontWeight: 600, marginTop: 1, letterSpacing: 0.3 },
+  prowTop: { display: "flex", alignItems: "center", gap: 7, marginBottom: 3 },
+  prowCompany: { fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  prowWork: { fontSize: 13.5, color: C.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  prowRight: { display: "flex", alignItems: "center", gap: 9, flexShrink: 0 },
+  dueText: { fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
+  taskCount: { display: "flex", alignItems: "center", gap: 3, fontSize: 12.5, color: C.ink3, fontWeight: 600 },
+
+  replyPill: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11.5, fontWeight: 700, padding: "2px 7px", borderRadius: 7 },
+
+  /* filter */
+  filterBar: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  filterSelect: {
+    background: C.panel, border: `1px solid ${C.line}`, borderRadius: 9, padding: "7px 10px",
+    fontSize: 14.5, color: C.ink, fontWeight: 500,
+  },
+  replyFilter: {
+    display: "flex", alignItems: "center", gap: 5, background: C.panel, border: `1px solid ${C.line}`,
+    borderRadius: 9, padding: "7px 11px", fontSize: 14.5, color: C.ink2, fontWeight: 600,
+  },
+  replyFilterOn: { background: "rgba(255,146,43,0.15)", borderColor: "#6E4A30", color: "#FF922B" },
+  resultCount: { marginLeft: "auto", fontSize: 12, color: C.ink3, fontWeight: 600, fontFamily: F.disp },
+
+  /* card grid */
+  grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 13 },
+  card: {
+    position: "relative", textAlign: "left", padding: 0, overflow: "hidden",
+    background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14,
+  },
+  cardBar: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
+  cardInner: { padding: "14px 15px 13px 18px" },
+  cardHead: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 9 },
+  statusDot: { fontSize: 11.5, fontWeight: 700 },
+  cardCompany: { fontWeight: 700, fontSize: 14.5, lineHeight: 1.3, marginBottom: 3 },
+  cardWork: { fontSize: 14, color: C.ink2, lineHeight: 1.45, marginBottom: 12, minHeight: 34,
+    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" },
+  cardMeta: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 11 },
+  cardReward: { fontFamily: F.disp, fontWeight: 700, fontSize: 16, fontVariantNumeric: "tabular-nums" },
+  cardDue: { display: "flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, fontFamily: F.disp },
+  cardFoot: { display: "flex", alignItems: "center", gap: 8, paddingTop: 11, borderTop: `1px solid ${C.line}` },
+  cardTasks: { display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, color: C.ink3, fontWeight: 600, marginLeft: "auto", fontFamily: F.disp },
+
+  /* tasks view */
+  trow: { display: "flex", alignItems: "center", gap: 12, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: "11px 14px" },
+  checkBtn: { border: "none", background: "transparent", padding: 0, display: "flex", flexShrink: 0 },
+  trowTitle: { fontSize: 14.5, fontWeight: 500, lineHeight: 1.35 },
+  trowDone: { textDecoration: "line-through", color: C.ink3, fontWeight: 400 },
+  trowProject: { display: "flex", alignItems: "center", gap: 5, border: "none", background: "transparent", padding: "3px 0 0", fontSize: 14.5, color: C.ink2, fontWeight: 600 },
+
+  /* empty */
+  emptyBox: { display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: "44px 0", color: C.ink3, fontSize: 14 },
+
+  /* drawer */
+  scrim: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 40 },
+  drawer: {
+    position: "fixed", top: 0, right: 0, bottom: 0, width: "min(440px, 100vw)", zIndex: 50,
+    background: C.bg, display: "flex", flexDirection: "column", boxShadow: "-12px 0 40px rgba(20,24,40,0.18)",
+  },
+  drawerHead: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 18px", borderBottom: `1px solid ${C.line}`, background: C.panel },
+  drawerTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 15 },
+  drawerBody: { flex: 1, overflowY: "auto", padding: 18, display: "flex", flexDirection: "column", gap: 14 },
+  drawerFoot: { display: "flex", alignItems: "center", gap: 8, padding: "13px 18px", borderTop: `1px solid ${C.line}`, background: C.panel },
+
+  field: { display: "flex", flexDirection: "column", gap: 6 },
+  fieldLabel: { fontSize: 14.5, fontWeight: 700, color: C.ink2, letterSpacing: 0.2 },
+  input: { width: "100%", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 9, padding: "9px 11px", fontSize: 14.5, color: C.ink },
+  row2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
+
+  taskBlockHead: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
+  addTaskBtn: { display: "flex", alignItems: "center", gap: 4, border: `1px solid ${C.line}`, background: C.panel, borderRadius: 8, padding: "5px 9px", fontSize: 14, fontWeight: 700, color: C.ink2 },
+  taskEditList: { display: "flex", flexDirection: "column", gap: 7 },
+  taskEmpty: { fontSize: 14, color: C.ink3, padding: "4px 0" },
+  taskEditRow: { display: "flex", alignItems: "center", gap: 7 },
+  taskInput: { flex: 1, minWidth: 0, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 9px", fontSize: 14.5 },
+  taskDate: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "6px 7px", fontSize: 14.5, color: C.ink2, width: 122 },
+
+  iconBtn: { border: "none", background: "transparent", color: C.ink2, display: "flex", padding: 4 },
+  iconBtnSm: { border: "none", background: "transparent", display: "flex", padding: 3 },
+
+  delBtn: { display: "flex", alignItems: "center", gap: 5, border: `1px solid #6E3838`, background: "rgba(255,107,107,0.13)", color: "#FF6B6B", borderRadius: 9, padding: "8px 12px", fontSize: 14.5, fontWeight: 700 },
+  delConfirm: { display: "flex", alignItems: "center", gap: 7 },
+  delText: { fontSize: 14.5, color: C.ink2, fontWeight: 600 },
+  delYes: { border: "none", background: "#FF6B6B", color: "#fff", borderRadius: 8, padding: "7px 13px", fontSize: 14.5, fontWeight: 700 },
+  delNo: { border: `1px solid ${C.line}`, background: C.panel, borderRadius: 8, padding: "7px 11px", fontSize: 14.5, fontWeight: 600, color: C.ink2 },
+
+  cancelBtn: { border: `1px solid ${C.line}`, background: C.panel, borderRadius: 9, padding: "9px 14px", fontSize: 14, fontWeight: 600, color: C.ink2 },
+  saveBtn: { border: "none", background: C.accent, color: "#fff", borderRadius: 9, padding: "9px 18px", fontSize: 14, fontWeight: 700 },
+
+  chip: { fontWeight: 700, borderRadius: 6, whiteSpace: "nowrap", letterSpacing: 0.2 },
+
+  /* reply assist */
+  replyBlock: { background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 12 },
+  replyBlockHead: { display: "flex", alignItems: "center", gap: 7 },
+  replyBlockTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 14.5 },
+  repliedBadge: { marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, fontSize: 14.5, fontWeight: 700, color: "#51CF66", background: "rgba(81,207,102,0.15)", padding: "3px 8px", borderRadius: 7 },
+  genBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: "none", background: C.accent, color: "#fff", borderRadius: 9, padding: "10px 14px", fontSize: 14, fontWeight: 700 },
+  genBtnBusy: { opacity: 0.7 },
+  genError: { fontSize: 14, color: "#FF6B6B", background: "rgba(255,107,107,0.13)", border: "1px solid #6E3838", borderRadius: 8, padding: "8px 10px" },
+  spinner: { width: 13, height: 13, border: "2px solid rgba(255,255,255,0.45)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" },
+  replyResult: { display: "flex", flexDirection: "column", gap: 8 },
+  replyResultHead: { display: "flex", alignItems: "center", justifyContent: "space-between" },
+  copyBtn: { display: "flex", alignItems: "center", gap: 4, border: `1px solid ${C.line}`, background: C.panel, borderRadius: 7, padding: "5px 9px", fontSize: 14.5, fontWeight: 700, color: C.ink2 },
+  repliedBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: "1px solid #2E5E3F", background: "rgba(81,207,102,0.15)", color: "#51CF66", borderRadius: 9, padding: "9px 14px", fontSize: 14.5, fontWeight: 700 },
+  openLink: { display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: 8, color: "#6B8AFF", background: "rgba(107,138,255,0.16)", textDecoration: "none", flexShrink: 0 },
+  openLinkCard: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 14, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.16)", padding: "2px 8px", borderRadius: 7, textDecoration: "none" },
+  openDestBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: "1px solid #3D4660", background: "rgba(107,138,255,0.16)", color: "#6B8AFF", borderRadius: 9, padding: "9px 14px", fontSize: 14.5, fontWeight: 700, textDecoration: "none" },
+
+  /* kanban */
+  kanbanHint: { fontSize: 12, color: C.ink3, fontWeight: 500 },
+
+  /* task tabs (Googleタスク風) */
+  taskTabs: { display: "flex", gap: 2, overflowX: "auto", borderBottom: `1.5px solid ${C.line}`, marginBottom: 2 },
+  taskTab: { position: "relative", display: "flex", alignItems: "center", gap: 6, flexShrink: 0, border: "none", background: "transparent", padding: "11px 14px 13px", fontSize: 14.5, fontWeight: 600, color: C.ink2, whiteSpace: "nowrap", borderRadius: "8px 8px 0 0" },
+  taskTabOn: { color: C.ink, fontWeight: 700 },
+  taskTabDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
+  taskTabCount: { fontFamily: F.disp, fontSize: 11.5, fontWeight: 700, padding: "1px 7px", borderRadius: 20, background: "#2A323D", color: C.ink2, minWidth: 18, textAlign: "center" },
+  taskTabBar: { position: "absolute", left: 10, right: 10, bottom: -1.5, height: 2.5, borderRadius: 2 },
+
+  laneBar: { display: "flex", alignItems: "center", gap: 9 },
+  laneBarTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 15.5, marginRight: "auto" },
+  laneBarAdd: { display: "flex", alignItems: "center", gap: 4, border: `1px solid ${C.line}`, background: C.panel, borderRadius: 9, padding: "7px 12px", fontSize: 14.5, fontWeight: 700, color: C.ink },
+
+  kanban: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(228px, 1fr))", gap: 12, alignItems: "start" },
+  lane: { background: "#1B212A", border: "1.5px solid #2A323D", borderRadius: 14, padding: 11, display: "flex", flexDirection: "column", gap: 9, minHeight: 140, transition: "background 0.12s, border-color 0.12s" },
+  laneHead: { display: "flex", alignItems: "center", gap: 7 },
+  laneDot: { width: 9, height: 9, borderRadius: "50%", flexShrink: 0 },
+  laneTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 14, color: C.ink },
+  laneCount: { fontFamily: F.disp, fontWeight: 700, fontSize: 11.5, padding: "1px 7px", borderRadius: 20, minWidth: 20, textAlign: "center" },
+  laneAdd: { marginLeft: "auto", border: "none", background: "transparent", color: C.ink3, display: "flex", padding: 3, borderRadius: 6 },
+  laneList: { display: "flex", flexDirection: "column", gap: 8 },
+  laneEmpty: { border: "1.5px dashed #333B46", borderRadius: 10, padding: "14px 8px", textAlign: "center", fontSize: 14.5, color: C.ink3, fontWeight: 500 },
+
+  tcard: { display: "flex", alignItems: "flex-start", gap: 10, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px 11px 12px 12px", cursor: "grab" },
+  tcardDone: { opacity: 0.62, cursor: "default" },
+  tcardTitle: { fontSize: 14, fontWeight: 600, lineHeight: 1.4, color: C.ink, wordBreak: "break-word" },
+  tcardMeta: { display: "flex", alignItems: "center", gap: 7, marginTop: 6, flexWrap: "wrap" },
+  tcardProject: { display: "flex", alignItems: "center", gap: 5, border: "none", background: "transparent", padding: 0, fontSize: 14, color: C.ink2, fontWeight: 600, minWidth: 0 },
+  tcardCompany: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 110 },
+  dueMini: { fontSize: 11.5, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
+
+  moveWrap: { position: "relative", flexShrink: 0 },
+  moveBtn: { border: "none", background: "transparent", padding: 2, display: "flex", cursor: "grab", touchAction: "none" },
+  tcardDragging: { opacity: 0.4 },
+  swipeArea: { minHeight: "55vh" },
+  ghost: { position: "fixed", zIndex: 100, pointerEvents: "none", background: C.panel, border: `1px solid ${C.accent}`, borderRadius: 10, padding: "8px 13px", fontSize: 14.5, fontWeight: 700, color: C.ink, boxShadow: "0 10px 28px rgba(20,24,40,0.22)", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+
+  /* header settings icon */
+  iconBtnHeader: { border: `1px solid ${C.line}`, background: C.panel, color: C.ink2, display: "flex", padding: 8, borderRadius: 9 },
+
+  /* assist buttons */
+  assistBtnRow: { display: "flex", gap: 8 },
+  assistNote: { fontSize: 11.5, color: C.ink3, lineHeight: 1.5 },
+  extractBtn: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, borderRadius: 9, padding: "10px 12px", fontSize: 14.5, fontWeight: 700 },
+  spinnerDark: { width: 13, height: 13, border: "2px solid rgba(24,27,34,0.25)", borderTopColor: C.ink, borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" },
+  extractMsg: { fontSize: 14, color: "#51CF66", background: "rgba(81,207,102,0.15)", border: "1px solid #2E5E3F", borderRadius: 8, padding: "8px 10px" },
+
+  /* settings modal */
+  modal: { position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", zIndex: 50, width: "min(440px, 92vw)", background: C.bg, borderRadius: 16, boxShadow: "0 24px 60px rgba(20,24,40,0.3)", overflow: "hidden" },
+  modalHead: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "15px 18px", borderBottom: `1px solid ${C.line}`, background: C.panel },
+  modalBody: { padding: 18, display: "flex", flexDirection: "column", gap: 13 },
+  settingNote: { fontSize: 14.5, color: C.ink2, lineHeight: 1.6 },
+  settingWarn: { fontSize: 14, color: C.ink3, lineHeight: 1.5, background: C.panel2, borderRadius: 8, padding: "8px 10px" },
+
+  /* task group */
+  taskGroup: { marginBottom: 16 },
+  taskGroupHead: { display: "flex", alignItems: "center", gap: 8, border: "none", background: "transparent", padding: "2px 2px 9px", width: "100%", textAlign: "left" },
+  taskGroupName: { fontFamily: F.disp, fontWeight: 700, fontSize: 14.5, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  taskGroupCount: { fontFamily: F.disp, fontSize: 11.5, fontWeight: 700, color: C.ink3, background: "#2A323D", borderRadius: 20, padding: "1px 8px", minWidth: 20, textAlign: "center" },
+
+  /* calendar */
+  calBar: { display: "flex", alignItems: "center", gap: 10 },
+  calNav: { border: `1px solid ${C.line}`, background: C.panel, borderRadius: 9, padding: 7, display: "flex", color: C.ink },
+  calTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 17, minWidth: 130, textAlign: "center" },
+  calToday: { marginLeft: "auto", border: `1px solid ${C.line}`, background: C.panel, borderRadius: 9, padding: "7px 14px", fontSize: 14.5, fontWeight: 700, color: C.ink },
+  calGrid: { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, background: C.line, border: `1px solid ${C.line}`, borderRadius: 14, padding: 4, overflow: "hidden" },
+  calWd: { fontSize: 12, fontWeight: 700, textAlign: "center", padding: "5px 0" },
+  calCell: { background: C.panel, border: "1.5px solid transparent", borderRadius: 9, minHeight: 50, padding: "5px 2px 6px", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, cursor: "pointer" },
+  calCellEmpty: { background: C.panel2, borderRadius: 9, minHeight: 50, opacity: 0.4 },
+  calCellSel: { borderColor: C.accent, background: "rgba(107,138,255,0.1)" },
+  calDay: { fontFamily: F.disp, fontWeight: 700, fontSize: 14, lineHeight: 1 },
+  calDayToday: { background: "#FF922B", color: "#fff", borderRadius: 13, minWidth: 21, height: 21, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" },
+  calDots: { display: "flex", gap: 2.5, minHeight: 6, alignItems: "center" },
+  calDot: { width: 5.5, height: 5.5, borderRadius: "50%" },
+
+  calDetail: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, display: "flex", flexDirection: "column", gap: 8 },
+  calDetailHead: { display: "flex", alignItems: "center", gap: 8, paddingBottom: 4 },
+  calDetailDate: { fontFamily: F.disp, fontWeight: 700, fontSize: 15, color: C.ink },
+  calDetailCount: { marginLeft: "auto", fontFamily: F.disp, fontSize: 12.5, fontWeight: 700, color: C.ink3 },
+  calDetailEmpty: { fontSize: 14.5, color: C.ink3, padding: "10px 2px" },
+  calDetailItem: { display: "flex", alignItems: "center", gap: 10, background: C.panel2, border: "none", borderRadius: 10, padding: "11px 12px", textAlign: "left", width: "100%" },
+  calDetailBar: { width: 4, alignSelf: "stretch", borderRadius: 3, flexShrink: 0 },
+  calDetailLabel: { flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  calDetailKind: { fontSize: 11.5, fontWeight: 700, flexShrink: 0 },
+  movePopScrim: { position: "fixed", inset: 0, zIndex: 30 },
+  movePop: { position: "absolute", top: 24, right: 0, zIndex: 31, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(20,24,40,0.16)", padding: 5, display: "flex", flexDirection: "column", gap: 2, minWidth: 130 },
+  moveItem: { display: "flex", alignItems: "center", gap: 7, border: "none", background: "transparent", borderRadius: 7, padding: "7px 9px", fontSize: 14, fontWeight: 600, color: C.ink, textAlign: "left", whiteSpace: "nowrap" },
+
+  addInline: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 11, padding: 9, display: "flex", flexDirection: "column", gap: 7 },
+  addInlineInput: { background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px 9px", fontSize: 14.5 },
+  addInlineSelect: { background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 8px", fontSize: 14, color: C.ink2 },
+  addInlineBtns: { display: "flex", gap: 6, justifyContent: "flex-end" },
+  addInlineCancel: { border: `1px solid ${C.line}`, background: C.panel, borderRadius: 8, padding: "6px 11px", fontSize: 14, fontWeight: 600, color: C.ink2 },
+  addInlineAdd: { border: "none", background: C.accent, color: "#fff", borderRadius: 8, padding: "6px 14px", fontSize: 14, fontWeight: 700 },
+};
+
+
+createRoot(document.getElementById("root")).render(React.createElement(App));
+
+</script>
+</body>
+</html>
