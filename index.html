@@ -37,7 +37,7 @@ import { createRoot } from "https://esm.sh/react-dom@18.2.0/client?deps=react@18
 import {
   LayoutDashboard, Briefcase, ListChecks, Plus, X, Trash2, Reply,
   Clock, CheckCircle2, Circle, AlertTriangle, Inbox, Sparkles, Copy, Check,
-  CalendarDays, Coins, ExternalLink, GripVertical, Settings, ChevronLeft, ChevronRight, ListPlus
+  CalendarDays, Coins, ExternalLink, GripVertical, Settings, ChevronLeft, ChevronRight, ListPlus, Download, Upload
 } from "https://esm.sh/lucide-react@0.383.0?deps=react@18.2.0";
 
 /* ============================================================
@@ -46,7 +46,31 @@ import {
    ============================================================ */
 
 const STORE_KEY = "cockpit:projects:v2";
+const SYNC_KEY = "cockpit:sync:v1";
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
+
+// ===== 端末間同期（GAS Web App + スプレッドシート） =====
+// GAS側は doGet(?token=) でデータを返し、doPost({token,data}) で保存する想定。
+// CORSプリフライトを避けるため POST は text/plain で送る。
+async function gasGet({ url, token }) {
+  const u = url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token) + "&_=" + Date.now();
+  const res = await fetch(u, { method: "GET" });
+  if (!res.ok) throw new Error("GET " + res.status);
+  const j = await res.json();
+  if (j && j.ok === false) throw new Error(j.error || "認証エラー");
+  return Array.isArray(j) ? j : (j && j.data) ? j.data : null;
+}
+async function gasPost({ url, token }, data) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ token, data }),
+  });
+  if (!res.ok) throw new Error("POST " + res.status);
+  const j = await res.json().catch(() => ({}));
+  if (j && j.ok === false) throw new Error(j.error || "認証エラー");
+  return true;
+}
 
 const PLATFORMS = {
   "クラウドワークス": "#FF9F43",
@@ -254,23 +278,90 @@ export default function App() {
     if (horiz && inward) goBack();
   };
 
+  /* ---- 同期設定・状態 ---- */
+  const [sync, setSync] = useState({ url: "", token: "", on: false });
+  const [syncState, setSyncState] = useState({ status: "idle", at: null, msg: "" });
+  const pushTimer = useRef(null);
+
+  // クラウドへ保存（デバウンス）
+  const pushCloud = (data, cfg) => {
+    const s = cfg || sync;
+    if (!s.on || !s.url) return;
+    if (pushTimer.current) clearTimeout(pushTimer.current);
+    pushTimer.current = setTimeout(async () => {
+      setSyncState((v) => ({ ...v, status: "syncing" }));
+      try {
+        await gasPost(s, data);
+        setSyncState({ status: "ok", at: Date.now(), msg: "" });
+      } catch (e) {
+        setSyncState({ status: "error", at: Date.now(), msg: String(e.message || e) });
+      }
+    }, 1200);
+  };
+
   /* ---- load ---- */
   useEffect(() => {
     (async () => {
-      try {
-        const r = await window.storage.get(STORE_KEY);
-        setProjects(r && r.value ? normalizeProjects(JSON.parse(r.value)) : normalizeProjects(makeSample()));
-        if (!r || !r.value) await window.storage.set(STORE_KEY, JSON.stringify(normalizeProjects(makeSample())));
-      } catch {
-        setProjects(normalizeProjects(makeSample()));
-        try { await window.storage.set(STORE_KEY, JSON.stringify(normalizeProjects(makeSample()))); } catch {}
-      } finally { setLoading(false); }
+      // 同期設定を読む
+      let cfg = { url: "", token: "", on: false };
+      try { const sr = await window.storage.get(SYNC_KEY); if (sr && sr.value) cfg = { ...cfg, ...JSON.parse(sr.value) }; } catch {}
+      setSync(cfg);
+
+      // まずローカルキャッシュ
+      let data = null;
+      try { const r = await window.storage.get(STORE_KEY); if (r && r.value) data = JSON.parse(r.value); } catch {}
+
+      // 同期が有効ならクラウドを優先して取得
+      if (cfg.on && cfg.url && cfg.token) {
+        setSyncState({ status: "syncing", at: null, msg: "" });
+        try {
+          const remote = await gasGet(cfg);
+          if (remote) {
+            data = remote;
+            try { await window.storage.set(STORE_KEY, JSON.stringify(remote)); } catch {}
+          }
+          setSyncState({ status: "ok", at: Date.now(), msg: "" });
+        } catch (e) {
+          setSyncState({ status: "error", at: Date.now(), msg: String(e.message || e) });
+        }
+      }
+
+      if (!data) {
+        data = normalizeProjects(makeSample());
+        try { await window.storage.set(STORE_KEY, JSON.stringify(data)); } catch {}
+      }
+      setProjects(normalizeProjects(data));
+      setLoading(false);
     })();
   }, []);
 
   const persist = async (next) => {
     setProjects(next);
     try { await window.storage.set(STORE_KEY, JSON.stringify(next)); } catch {}
+    pushCloud(next);
+  };
+
+  // 同期設定の保存
+  const saveSync = async (cfg) => {
+    setSync(cfg);
+    try { await window.storage.set(SYNC_KEY, JSON.stringify(cfg)); } catch {}
+  };
+  // 手動: クラウドへ保存
+  const syncPush = async () => {
+    if (!sync.url || !sync.token) return;
+    setSyncState({ status: "syncing", at: null, msg: "" });
+    try { await gasPost(sync, projects); setSyncState({ status: "ok", at: Date.now(), msg: "保存しました" }); }
+    catch (e) { setSyncState({ status: "error", at: Date.now(), msg: String(e.message || e) }); }
+  };
+  // 手動: クラウドから取得
+  const syncPull = async () => {
+    if (!sync.url || !sync.token) return;
+    setSyncState({ status: "syncing", at: null, msg: "" });
+    try {
+      const remote = await gasGet(sync);
+      if (remote) { const norm = normalizeProjects(remote); setProjects(norm); await window.storage.set(STORE_KEY, JSON.stringify(norm)); }
+      setSyncState({ status: "ok", at: Date.now(), msg: "取得しました" });
+    } catch (e) { setSyncState({ status: "error", at: Date.now(), msg: String(e.message || e) }); }
   };
 
   /* ---- mutations ---- */
@@ -359,7 +450,8 @@ export default function App() {
         {view === "calendar" && <CalendarView projects={projects} onOpen={setEditing} />}
       </main>
 
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)}
+        sync={sync} syncState={syncState} onSaveSync={saveSync} onSyncPush={syncPush} onSyncPull={syncPull} />}
 
       {/* ===== Drawer ===== */}
       {editing && (
@@ -1450,10 +1542,16 @@ function ReplyHistoryList({ history }) {
   );
 }
 
-function SettingsModal({ onClose }) {
+function SettingsModal({ onClose, sync, syncState, onSaveSync, onSyncPush, onSyncPull }) {
   const [key, setKey] = useState("");
   const [saved, setSaved] = useState(false);
   const [loaded, setLoaded] = useState(false);
+
+  // 同期設定の編集用ローカルコピー
+  const [sUrl, setSUrl] = useState(sync?.url || "");
+  const [sToken, setSToken] = useState(sync?.token || "");
+  const [sOn, setSOn] = useState(!!sync?.on);
+  const [syncSaved, setSyncSaved] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -1465,6 +1563,20 @@ function SettingsModal({ onClose }) {
   const save = async () => {
     try { await window.storage.set("cockpit:apikey", key.trim()); setSaved(true); setTimeout(() => setSaved(false), 1600); } catch {}
   };
+
+  const saveSyncCfg = async () => {
+    await onSaveSync({ url: sUrl.trim(), token: sToken.trim(), on: sOn });
+    setSyncSaved(true); setTimeout(() => setSyncSaved(false), 1600);
+  };
+
+  const syncStatusText = () => {
+    if (!syncState) return "";
+    if (syncState.status === "syncing") return "同期中…";
+    if (syncState.status === "ok") return "同期OK" + (syncState.at ? "（" + new Date(syncState.at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }) + "）" : "") + (syncState.msg ? " " + syncState.msg : "");
+    if (syncState.status === "error") return "エラー: " + (syncState.msg || "");
+    return "";
+  };
+  const syncStatusColor = syncState?.status === "error" ? "#FF6B6B" : syncState?.status === "ok" ? "#51CF66" : C.ink3;
 
   const [resetting, setResetting] = useState(false);
   const resetSample = async () => {
@@ -1491,6 +1603,36 @@ function SettingsModal({ onClose }) {
           </Field>
           <div style={S.settingWarn}>キーはこのブラウザ内にのみ保存され、Anthropic API以外には送信されません。共用端末では入力しないでください。</div>
           <button style={S.saveBtn} onClick={save} disabled={!loaded}>{saved ? "保存しました" : "保存"}</button>
+
+          <div style={S.settingDivider} />
+
+          {/* ===== 端末間の同期 ===== */}
+          <Field label="端末間の同期（GAS＋スプレッドシート）">
+            <div style={S.settingNote}>
+              スマホとPCで同じデータを見るための設定です。Googleスプレッドシートに用意したGAS Web AppのURLとキーを入力してください。設定手順は別ファイル「gas-sync.gs」のコメントを参照してください。
+            </div>
+          </Field>
+          <Field label="GAS Web App URL">
+            <input style={S.input} value={sUrl} placeholder="https://script.google.com/macros/s/.../exec"
+              onChange={(e) => setSUrl(e.target.value)} />
+          </Field>
+          <Field label="同期キー（GASに設定した合言葉）">
+            <input style={S.input} type="password" value={sToken} placeholder="任意の文字列"
+              onChange={(e) => setSToken(e.target.value)} />
+          </Field>
+          <label style={S.syncToggleRow} onClick={() => setSOn((v) => !v)}>
+            <span style={{ ...S.syncCheck, ...(sOn ? S.syncCheckOn : {}) }}>{sOn && <Check size={13} strokeWidth={3} color="#fff" />}</span>
+            <span style={S.syncToggleLabel}>同期を有効にする（起動時に取得・変更時に保存）</span>
+          </label>
+          <button style={S.saveBtn} onClick={saveSyncCfg}>{syncSaved ? "保存しました" : "同期設定を保存"}</button>
+          <div style={S.syncBtnRow}>
+            <button style={S.syncSubBtn} onClick={onSyncPull} disabled={!sUrl || !sToken}><Download size={14} strokeWidth={2.3} />クラウドから取得</button>
+            <button style={S.syncSubBtn} onClick={onSyncPush} disabled={!sUrl || !sToken}><Upload size={14} strokeWidth={2.3} />クラウドへ保存</button>
+          </div>
+          {syncState && syncState.status !== "idle" && (
+            <div style={{ ...S.syncStatus, color: syncStatusColor }}>{syncStatusText()}</div>
+          )}
+          <div style={S.settingWarn}>このキーは簡易的な合言葉です。完全な認証ではないため、URLとキーは他人に教えないでください。複数端末で同時に編集すると、後から保存した内容で上書きされます。</div>
 
           <div style={S.settingDivider} />
           <div style={S.settingNote}>サンプルデータに戻します。この端末・ブラウザに保存中の案件・タスクはすべて消えます。</div>
@@ -1989,6 +2131,13 @@ const S = {
   settingNote: { fontSize: 14.5, color: C.ink2, lineHeight: 1.6 },
   settingWarn: { fontSize: 14, color: C.ink3, lineHeight: 1.5, background: C.panel2, borderRadius: 8, padding: "8px 10px" },
   settingDivider: { height: 1, background: C.line, margin: "4px 0" },
+  syncToggleRow: { display: "flex", alignItems: "center", gap: 9, padding: "4px 0", cursor: "pointer" },
+  syncCheck: { width: 20, height: 20, borderRadius: 6, border: `1.5px solid ${C.line}`, background: C.panel2, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  syncCheckOn: { background: C.accent, borderColor: C.accent },
+  syncToggleLabel: { fontSize: 13.5, color: C.ink, fontWeight: 600 },
+  syncBtnRow: { display: "flex", gap: 8, marginTop: 8 },
+  syncSubBtn: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, borderRadius: 9, padding: "9px 10px", fontSize: 13, fontWeight: 700 },
+  syncStatus: { fontSize: 12.5, fontWeight: 700, marginTop: 8 },
   resetBtn: { border: `1px solid ${C.line}`, background: C.panel2, color: C.ink2, borderRadius: 9, padding: "10px 14px", fontSize: 13, fontWeight: 700 },
   resetBtnConfirm: { border: "1px solid rgba(255,107,107,0.5)", background: "rgba(255,107,107,0.13)", color: "#FF6B6B" },
 
