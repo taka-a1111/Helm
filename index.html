@@ -291,6 +291,7 @@ export default function App() {
   const [view, setView] = useState("focus");
   const [navStack, setNavStack] = useState([]); // 画面遷移の履歴（戻る用）
   const VIEWS = ["focus", "tasks", "calendar"];
+  useEffect(() => { try { window.scrollTo(0, 0); const m = document.querySelector("main"); if (m) m.scrollTop = 0; } catch {} }, [view]);
   const go = (v) => { if (v !== view) { setNavStack((s) => [...s, view]); setView(v); } };
   const winW = () => (typeof window !== "undefined" ? window.innerWidth : 400);
   const EDGE = 28;
@@ -524,7 +525,6 @@ export default function App() {
           <div style={S.brandMark}>H</div>
           <div>
             <div style={S.brandTitle}>Helm</div>
-            <div style={S.brandSub}>{active.length}件 進行中 · {kpi.needReply}件 要返信</div>
           </div>
         </div>
         <nav style={S.tabs}>
@@ -665,10 +665,10 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
                 <span style={{ ...S.kpiLabel, ...(opened ? { color: C.ink, fontWeight: 700 } : {}) }}>{c.label}</span>
                 <c.Icon size={17} color={c.color} strokeWidth={2.2} />
               </div>
-              <div style={{ ...S.kpiValue, color: c.color, fontSize: c.wide ? 26 : 34 }}>
+              <div style={{ ...S.kpiValue, color: c.color, fontSize: c.wide ? 22 : 28 }}>
                 {c.value}<span style={S.kpiUnit}>{c.unit}</span>
               </div>
-              <span style={{ ...S.kpiHint, ...(opened ? { color: c.color, fontWeight: 700 } : {}) }}>{opened ? "▲ 閉じる" : "タップで一覧"}</span>
+              {opened && <span style={{ ...S.kpiHint, color: c.color, fontWeight: 700 }}>▲ 閉じる</span>}
             </button>
           );
         })}
@@ -1985,7 +1985,7 @@ function CalendarView({ projects, onOpen }) {
       const dates = [...new Set([t.start, t.due].filter(Boolean))];
       dates.forEach((dk) => push(dk, { kind: "task", label: t.title, color: C.accent, project: p }));
     });
-    if (p.deadline && p.id !== INBOX_ID && p.status !== "完了") push(p.deadline, { kind: "deadline", label: `${p.company}：納期`, color: "#FF6B6B", project: p });
+    if (p.deadline && p.id !== INBOX_ID && p.status !== "完了") push(p.deadline, { kind: "deadline", label: "納期", color: "#FF6B6B", project: p });
   });
 
   const startDow = new Date(ym.y, ym.m, 1).getDay();
@@ -2057,7 +2057,11 @@ function CalendarView({ projects, onOpen }) {
         {selItems.map((it, j) => (
           <button key={j} style={S.calDetailItem} onClick={() => it.project.id !== INBOX_ID && onOpen(it.project)}>
             <span style={{ ...S.calDetailBar, background: it.color }} />
-            <span style={S.calDetailLabel}>{it.label}</span>
+            <span style={S.calDetailCol}>
+              <span style={S.calDetailLabel}>{it.label}</span>
+              {it.project && it.project.id !== INBOX_ID && it.project.company &&
+                <span style={S.calDetailProject}>{it.project.company}</span>}
+            </span>
             <span style={{ ...S.calDetailKind, color: it.color }}>{it.kind === "deadline" ? "納期" : "タスク"}</span>
           </button>
         ))}
@@ -2240,14 +2244,14 @@ const S = {
   replyItemName: { fontWeight: 700, fontSize: 14, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   replyItemLink: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.16)", padding: "6px 11px", borderRadius: 8, textDecoration: "none", flexShrink: 0, whiteSpace: "nowrap" },
 
-  kpiRow: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(158px, 1fr))", gap: 12 },
-  kpiCard: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "16px 17px", textAlign: "left", width: "100%" },
+  kpiRow: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 },
+  kpiCard: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "11px 13px", textAlign: "left", width: "100%" },
   kpiCardBtn: { cursor: "pointer" },
-  kpiHint: { display: "block", marginTop: 6, fontSize: 13.5, color: C.ink3, fontWeight: 600 },
+  kpiHint: { display: "block", marginTop: 4, fontSize: 13, color: C.ink3, fontWeight: 600 },
   kpiTop: { display: "flex", alignItems: "center", justifyContent: "space-between" },
-  kpiLabel: { fontSize: 14, color: C.ink2, fontWeight: 600 },
-  kpiValue: { fontFamily: F.disp, fontWeight: 700, marginTop: 8, lineHeight: 1, fontVariantNumeric: "tabular-nums" },
-  kpiUnit: { fontSize: 14, marginLeft: 3, fontWeight: 500 },
+  kpiLabel: { fontSize: 13.5, color: C.ink2, fontWeight: 600 },
+  kpiValue: { fontFamily: F.disp, fontWeight: 700, marginTop: 3, lineHeight: 1, fontVariantNumeric: "tabular-nums" },
+  kpiUnit: { fontSize: 13, marginLeft: 3, fontWeight: 500 },
 
   /* section */
   sectionHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 12 },
@@ -2543,7 +2547,9 @@ const S = {
   calDetailEmpty: { fontSize: 14.5, color: C.ink3, padding: "10px 2px" },
   calDetailItem: { display: "flex", alignItems: "center", gap: 10, background: C.panel2, border: "none", borderRadius: 10, padding: "11px 12px", textAlign: "left", width: "100%" },
   calDetailBar: { width: 4, alignSelf: "stretch", borderRadius: 3, flexShrink: 0 },
-  calDetailLabel: { flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  calDetailCol: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 },
+  calDetailLabel: { minWidth: 0, fontSize: 15, fontWeight: 600, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  calDetailProject: { minWidth: 0, fontSize: 13, fontWeight: 600, color: C.ink3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   calDetailKind: { fontSize: 14, fontWeight: 700, flexShrink: 0 },
   movePopScrim: { position: "fixed", inset: 0, zIndex: 30 },
   movePop: { position: "absolute", top: 24, right: 0, zIndex: 31, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(20,24,40,0.16)", padding: 5, display: "flex", flexDirection: "column", gap: 2, minWidth: 130 },
