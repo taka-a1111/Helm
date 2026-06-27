@@ -472,6 +472,10 @@ export default function App() {
     }));
   const setDeadline = (pid, deadline) =>
     persist(projects.map((p) => p.id !== pid ? p : { ...p, deadline }));
+  const updateTask = (pid, tid, patch) =>
+    persist(projects.map((p) => p.id !== pid ? p : {
+      ...p, tasks: p.tasks.map((t) => t.id === tid ? { ...t, ...patch } : t),
+    }));
 
   /* ---- derived ---- */
   const active = useMemo(() => projects.filter((p) => p.status !== "完了" && p.id !== INBOX_ID), [projects]);
@@ -528,7 +532,7 @@ export default function App() {
         <div style={S.viewDots}>
           {VIEWS.map((v) => <span key={v} style={{ ...S.viewDot, ...(view === v ? S.viewDotOn : {}) }} />)}
         </div>
-        {view === "focus" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={setEditing} onSetDeadline={setDeadline} onAddTask={addTaskToLane} />}
+        {view === "focus" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={setEditing} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} />}
         {view === "tasks" && <TasksView projects={projects} onToggle={toggleTask} onOpen={setEditing} onOpenTask={openProjectTask} onChangeLane={changeLane} onChangeDue={changeDue} onAddTask={addTaskToLane} />}
         {view === "calendar" && <CalendarView projects={projects} onOpen={setEditing} />}
       </main>
@@ -557,7 +561,7 @@ export default function App() {
 /* ============================================================
    フォーカス（ダッシュボード）
    ============================================================ */
-function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask }) {
+function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask }) {
   const [openCard, setOpenCard] = useState(null);
   const [openMsg, setOpenMsg] = useState(null);
   const [fPlat, setFPlat] = useState("すべて");
@@ -733,7 +737,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
         </div>
         {cardList.length === 0 && <Empty text="条件に合う案件がありません。" />}
         <div style={S.grid}>
-          {cardList.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onAddTask={onAddTask} />)}
+          {cardList.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onAddTask={onAddTask} onUpdateTask={onUpdateTask} />)}
         </div>
       </section>
     </div>
@@ -814,18 +818,19 @@ function ProjectsView({ projects, onOpen }) {
 
       {filtered.length === 0 && <Empty text="条件に合う案件がありません。" />}
       <div style={S.grid}>
-        {filtered.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onAddTask={onAddTask} />)}
+        {filtered.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onAddTask={onAddTask} onUpdateTask={onUpdateTask} />)}
       </div>
     </div>
   );
 }
 
-function ProjectCard({ p, onOpen, onSetDeadline, onAddTask }) {
+function ProjectCard({ p, onOpen, onSetDeadline, onAddTask, onUpdateTask }) {
   const replyN = replyTasksOf(p).length;
   const li = linkInfo(p.replyUrl);
   const dl = p.deadline ? dateLabelJP(p.deadline) : null;
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
+  const [editId, setEditId] = useState(null);
   const openTasks = p.tasks
     .filter((t) => !t.done && t.kind !== "reply")
     .sort((a, b) => {
@@ -838,7 +843,9 @@ function ProjectCard({ p, onOpen, onSetDeadline, onAddTask }) {
   const moreTasks = openTasks.length - showTasks.length;
   const stop = (e) => e.stopPropagation();
   const openPicker = (e) => { e.stopPropagation(); const inp = e.currentTarget.querySelector("input"); try { inp && inp.showPicker && inp.showPicker(); } catch {} };
+  const openPickerInput = (e) => { e.stopPropagation(); try { e.currentTarget.showPicker && e.currentTarget.showPicker(); } catch {} };
   const submitTask = () => { const t = newTitle.trim(); if (t) { onAddTask && onAddTask(p.id, "later", t); setNewTitle(""); } };
+  const upd = (tid, patch) => onUpdateTask && onUpdateTask(p.id, tid, patch);
   return (
     <div style={S.card} role="button" tabIndex={0} onClick={() => onOpen(p)}>
       {replyN > 0 && (
@@ -861,9 +868,32 @@ function ProjectCard({ p, onOpen, onSetDeadline, onAddTask }) {
       {(showTasks.length > 0 || adding) && (
         <div style={S.cardTaskList}>
           {showTasks.map((t) => {
+            if (editId === t.id) {
+              return (
+                <div key={t.id} style={S.cardTaskEdit} onClick={stop}>
+                  <input autoFocus style={S.cardTaskEditInput} value={t.title}
+                    placeholder="やること"
+                    onChange={(e) => upd(t.id, { title: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); setEditId(null); } }} />
+                  <div style={S.cardTaskEditDates}>
+                    <label style={S.cardTaskEditField}>
+                      <span style={S.cardTaskEditLabel}>いつやる</span>
+                      <input type="date" style={S.cardTaskEditDate} value={t.start || ""}
+                        onClick={openPickerInput} onChange={(e) => upd(t.id, { start: e.target.value })} />
+                    </label>
+                    <label style={S.cardTaskEditField}>
+                      <span style={S.cardTaskEditLabel}>期限</span>
+                      <input type="date" style={S.cardTaskEditDate} value={t.due || ""}
+                        onClick={openPickerInput} onChange={(e) => upd(t.id, { due: e.target.value })} />
+                    </label>
+                    <button style={S.cardTaskEditDone} onClick={() => setEditId(null)}>完了</button>
+                  </div>
+                </div>
+              );
+            }
             const lab = dateLabelJP(taskJudgeDate(t));
             return (
-              <div key={t.id} style={S.cardTaskRow}>
+              <div key={t.id} style={S.cardTaskRow} onClick={(e) => { stop(e); setEditId(t.id); }}>
                 <span style={S.cardTaskDot} />
                 <span style={S.cardTaskTitle}>{t.title || "（無題）"}</span>
                 {lab && <span style={lab.overdue ? S.cardTaskOver : S.cardTaskDate}>{lab.text}</span>}
@@ -2179,7 +2209,14 @@ const S = {
   cardDue: { display: "flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
   cardDueNone: { display: "none" },
   cardTaskList: { display: "flex", flexDirection: "column", gap: 10, marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.line}` },
-  cardTaskRow: { display: "flex", alignItems: "center", gap: 10 },
+  cardTaskRow: { display: "flex", alignItems: "center", gap: 10, cursor: "pointer" },
+  cardTaskEdit: { display: "flex", flexDirection: "column", gap: 8, padding: "10px 11px", background: C.panel2, border: `1px solid ${C.accent}`, borderRadius: 10 },
+  cardTaskEditInput: { width: "100%", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px 10px", fontSize: 15, color: C.ink },
+  cardTaskEditDates: { display: "flex", alignItems: "flex-end", gap: 8 },
+  cardTaskEditField: { flex: 1, display: "flex", flexDirection: "column", gap: 3, minWidth: 0 },
+  cardTaskEditLabel: { fontSize: 12, fontWeight: 700, color: C.ink3 },
+  cardTaskEditDate: { width: "100%", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 8px", fontSize: 14, color: C.ink2 },
+  cardTaskEditDone: { border: "none", background: C.accent, color: "#fff", borderRadius: 8, padding: "9px 16px", fontSize: 14, fontWeight: 700, flexShrink: 0 },
   cardTaskDot: { width: 7, height: 7, borderRadius: "50%", border: `1.5px solid ${C.ink3}`, flexShrink: 0 },
   cardTaskTitle: { flex: 1, minWidth: 0, fontSize: 15, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   cardTaskDate: { fontSize: 14.5, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap", flexShrink: 0, color: C.ink2 },
