@@ -45,7 +45,7 @@ import {
    データは window.storage に永続保存（このブラウザ内）
    ============================================================ */
 
-const STORE_KEY = "cockpit:projects:v1";
+const STORE_KEY = "cockpit:projects:v2";
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
 
 const PLATFORMS = {
@@ -205,16 +205,22 @@ export default function App() {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("focus");
+  const [navStack, setNavStack] = useState([]); // 画面遷移の履歴（戻る用）
   const VIEWS = ["focus", "projects", "tasks", "calendar"];
+  const go = (v) => { if (v !== view) { setNavStack((s) => [...s, view]); setView(v); } };
+  const winW = () => (typeof window !== "undefined" ? window.innerWidth : 400);
+  const EDGE = 28;
   const navSwipe = useRef({ x: 0, y: 0 });
   const onMainTouchStart = (e) => { const t = e.touches[0]; navSwipe.current = { x: t.clientX, y: t.clientY }; };
   const onMainTouchEnd = (e) => {
     const t = e.changedTouches && e.changedTouches[0]; if (!t) return;
+    const sx = navSwipe.current.x;
+    if (sx <= EDGE || sx >= winW() - EDGE) return; // 端から始まったスワイプは「戻る」に任せる
     const dx = t.clientX - navSwipe.current.x, dy = t.clientY - navSwipe.current.y;
     if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
       const i = VIEWS.indexOf(view);
-      if (dx < 0 && i < VIEWS.length - 1) setView(VIEWS[i + 1]);
-      else if (dx > 0 && i > 0) setView(VIEWS[i - 1]);
+      if (dx < 0 && i < VIEWS.length - 1) go(VIEWS[i + 1]);
+      else if (dx > 0 && i > 0) go(VIEWS[i - 1]);
     }
   };
   const [editing, setEditing] = useState(null); // draft object or null
@@ -222,6 +228,31 @@ export default function App() {
   const openProjectTask = (project, taskId) => { setFocusTaskId(taskId || null); setEditing(project); };
   const [confirmDel, setConfirmDel] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+
+  // 「戻る」：開いているオーバーレイを閉じる → なければ前の画面へ
+  const goBack = () => {
+    if (confirmDel) { setConfirmDel(null); return; }
+    if (showSettings) { setShowSettings(false); return; }
+    if (editing) { setEditing(null); setFocusTaskId(null); return; }
+    setNavStack((s) => { if (!s.length) return s; setView(s[s.length - 1]); return s.slice(0, -1); });
+  };
+  // 画面端から内側へのスワイプで「戻る」
+  const edgeRef = useRef(null);
+  const onRootTouchStart = (e) => {
+    const t = e.touches[0]; if (!t) { edgeRef.current = null; return; }
+    const w = winW(), fromLeft = t.clientX <= EDGE, fromRight = t.clientX >= w - EDGE;
+    edgeRef.current = (fromLeft || fromRight) ? { x: t.clientX, y: t.clientY, side: fromLeft ? "L" : "R" } : null;
+  };
+  const onRootTouchEnd = (e) => {
+    if (!edgeRef.current) return;
+    const t = e.changedTouches && e.changedTouches[0];
+    if (!t) { edgeRef.current = null; return; }
+    const dx = t.clientX - edgeRef.current.x, dy = t.clientY - edgeRef.current.y;
+    const horiz = Math.abs(dx) > 64 && Math.abs(dx) > Math.abs(dy) * 1.4;
+    const inward = (edgeRef.current.side === "L" && dx > 0) || (edgeRef.current.side === "R" && dx < 0);
+    edgeRef.current = null;
+    if (horiz && inward) goBack();
+  };
 
   /* ---- load ---- */
   useEffect(() => {
@@ -286,7 +317,7 @@ export default function App() {
   );
 
   return (
-    <div style={S.shell}>
+    <div style={S.shell} onTouchStart={onRootTouchStart} onTouchEnd={onRootTouchEnd}>
       <Fonts />
 
       {/* ===== Header ===== */}
@@ -305,7 +336,7 @@ export default function App() {
             ["tasks", "タスク", ListChecks],
             ["calendar", "カレンダー", CalendarDays],
           ].map(([k, label, Icon]) => (
-            <button key={k} onClick={() => setView(k)} title={label} aria-label={label}
+            <button key={k} onClick={() => go(k)} title={label} aria-label={label}
               style={{ ...S.tab, ...(view === k ? S.tabOn : {}) }}>
               <Icon size={22} strokeWidth={view === k ? 2.4 : 2} />
             </button>
@@ -507,22 +538,20 @@ function PriorityRow({ p, onOpen }) {
         <span style={S.prowDayUnit}>{d.n === null ? "" : d.n < 0 ? "超過" : "日"}</span>
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={S.prowTop}>
-          <PlatformChip name={p.platform} />
-          <span style={S.prowCompany}>{p.company}</span>
+        <div style={S.prowMeta}>
+          <PlatformChip name={p.platform} small />
+          {replyN > 0 && <span style={{ ...S.replyPill, color: "#FF922B", background: "rgba(255,146,43,0.15)" }}><Reply size={11} strokeWidth={2.4} />返信{replyN}</span>}
+          {open > 0 && <span style={S.taskCount}><Circle size={10} strokeWidth={2.4} />{open}</span>}
+          <span style={{ ...S.dueText, color: d.color }}>{d.text}</span>
+          {replyN > 0 && p.replyUrl && (
+            <a href={p.replyUrl} target="_blank" rel="noopener noreferrer" style={S.openLinkMeta}
+              onClick={(e) => e.stopPropagation()} title="返信先を開く">
+              <ExternalLink size={14} strokeWidth={2.3} />
+            </a>
+          )}
         </div>
-        <div style={S.prowWork}>{p.work || "（業務内容未設定）"}</div>
-      </div>
-      <div style={S.prowRight}>
-        {replyN > 0 && <span style={{ ...S.replyPill, color: "#FF922B", background: "rgba(255,146,43,0.15)" }}><Reply size={12} strokeWidth={2.4} />返信{replyN}</span>}
-        {open > 0 && <span style={S.taskCount}><Circle size={11} strokeWidth={2.4} />{open}</span>}
-        <span style={{ ...S.dueText, color: d.color }}>{d.text}</span>
-        {replyN > 0 && p.replyUrl && (
-          <a href={p.replyUrl} target="_blank" rel="noopener noreferrer" style={S.openLink}
-            onClick={(e) => e.stopPropagation()} title="返信先を開く">
-            <ExternalLink size={15} strokeWidth={2.3} />
-          </a>
-        )}
+        <div style={S.prowCompanyBig}>{p.company}</div>
+        {p.work && <div style={S.prowWork}>{p.work}</div>}
       </div>
     </button>
   );
@@ -939,9 +968,9 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onDelete, confirmDel, onC
     setParsing(true); setParseMsg(""); setPendingDiff([]);
     try {
       const text = await callClaude({
-        maxTokens: 600,
-        system: "あなたは案件情報を構造化するアシスタントです。貼り付けられた募集文・案件情報から、以下のJSONだけを出力します。説明やコードブロック記法は付けないこと。\n{\"company\":\"会社名/クライアント名\",\"platform\":\"クラウドワークス|ランサーズ|ココナラ|直契約|その他 のいずれか\",\"work\":\"業務内容の要約\",\"reward\":数値（報酬の円。範囲なら下限。不明は0）,\"deadline\":\"YYYY-MM-DD（納期。不明は空文字）\",\"replyUrl\":\"応募/メッセージのURL。無ければ空文字\"}\n判断できない項目は空文字または0にする。",
-        user: pasteText.slice(0, 4000),
+        maxTokens: 1200,
+        system: "あなたは案件情報を構造化するアシスタントです。貼り付けられた募集文・案件情報・クライアントとのやり取りから、以下のJSONだけを出力します。説明やコードブロック記法は付けないこと。\n{\"company\":\"会社名/クライアント名\",\"platform\":\"クラウドワークス|ランサーズ|ココナラ|直契約|その他 のいずれか\",\"work\":\"業務内容の要約\",\"reward\":数値（報酬の円。範囲なら下限。不明は0）,\"deadline\":\"YYYY-MM-DD（納期。不明は空文字）\",\"replyUrl\":\"応募/メッセージのURL。無ければ空文字\",\"received\":\"クライアント（相手）から届いた、まだ返信していないメッセージの本文。あれば改変せず原文のまま入れる。自分が送った文や事務局の定型通知は含めない。無ければ空文字\"}\n貼り付け内容に相手からのメッセージ本文が含まれていれば、必ず received に原文を抜き出すこと。判断できない項目は空文字または0にする。",
+        user: pasteText.slice(0, 6000),
       });
       let obj = {};
       try { obj = JSON.parse(text.replace(/```json|```/g, "").trim()); } catch { obj = {}; }
@@ -953,8 +982,9 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onDelete, confirmDel, onC
         reward: obj.reward ? String(obj.reward) : "",
         deadline: /^\d{4}-\d{2}-\d{2}$/.test(obj.deadline || "") ? obj.deadline : "",
         replyUrl: obj.replyUrl || "",
+        received: (obj.received || "").trim(),
       };
-      const labels = { company: "会社名", platform: "契約先", work: "業務内容", reward: "報酬", deadline: "納期", replyUrl: "返信先URL" };
+      const labels = { company: "会社名", platform: "契約先", work: "業務内容", reward: "報酬", deadline: "納期", replyUrl: "返信先URL", received: "届いたメッセージ" };
       const autoFill = {};   // 空欄に入れる
       const diffs = [];      // 既存値と異なる（確認が必要）
       Object.keys(parsed).forEach((f) => {
@@ -1157,8 +1187,8 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onDelete, confirmDel, onC
             </div>
             <div style={S.parseHint}>
               {isNew
-                ? "募集文や案件情報を貼り付けると、会社名・契約先・業務・報酬・期限などを読み取って下に入力します。"
-                : "更新された案件情報を貼り付けて読み取れます。空欄は自動で入力し、既存の値と異なる項目は上書き前に確認します。"}
+                ? "募集文・案件情報やクライアントから届いたメッセージを貼り付けると、会社名・契約先・業務・報酬・期限に加え、まだ返信していないメッセージ本文も読み取って下に入力します。"
+                : "更新された案件情報や、届いたメッセージを貼り付けて読み取れます。空欄は自動入力し、既存の値と異なる項目は上書き前に確認します。届いた未返信メッセージは「届いたメッセージ」欄に取り込み、返信アシストに使えます。"}
             </div>
             <textarea style={{ ...S.input, minHeight: 70, resize: "vertical" }} value={pasteText}
               placeholder="募集文・メッセージなどをそのまま貼り付け"
@@ -1182,9 +1212,9 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onDelete, confirmDel, onC
                       <button style={S.diffApply} onClick={() => applyDiff(x.field)}>更新</button>
                     </div>
                     <div style={S.diffVals}>
-                      <span style={S.diffCur}>{x.current || "（空）"}</span>
+                      <span style={S.diffCur}>{x.current ? (x.current.length > 60 ? x.current.slice(0, 60) + "…" : x.current) : "（空）"}</span>
                       <ChevronRight size={13} color={C.ink3} />
-                      <span style={S.diffNext}>{x.next}</span>
+                      <span style={S.diffNext}>{x.next.length > 60 ? x.next.slice(0, 60) + "…" : x.next}</span>
                     </div>
                   </div>
                 ))}
@@ -1193,7 +1223,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onDelete, confirmDel, onC
           </div>
 
           <Field label="会社名 / クライアント">
-            <input style={S.input} value={d.company} placeholder="例：水上工芸"
+            <input style={S.input} value={d.company} placeholder="例：〇〇株式会社"
               onChange={(e) => set("company", e.target.value)} />
           </Field>
 
@@ -1731,22 +1761,25 @@ const S = {
   /* priority list */
   list: { display: "flex", flexDirection: "column", gap: 10 },
   prow: {
-    display: "flex", alignItems: "center", gap: 14, width: "100%", textAlign: "left",
-    background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "14px 15px",
+    display: "flex", alignItems: "flex-start", gap: 12, width: "100%", textAlign: "left",
+    background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "13px 14px",
   },
   prowDay: {
-    width: 46, height: 46, borderRadius: 11, border: "1.5px solid", flexShrink: 0,
+    width: 44, height: 44, borderRadius: 11, border: "1.5px solid", flexShrink: 0, marginTop: 1,
     display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
     fontFamily: F.disp, fontWeight: 700, fontSize: 19, fontVariantNumeric: "tabular-nums", lineHeight: 1,
   },
   prowDayUnit: { fontSize: 8.5, fontWeight: 600, marginTop: 1, letterSpacing: 0.3 },
+  prowMeta: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 5 },
+  prowCompanyBig: { fontFamily: F.disp, fontWeight: 800, fontSize: 16.5, letterSpacing: 0.2, color: C.ink, lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" },
   prowTop: { display: "flex", alignItems: "center", gap: 7, marginBottom: 3 },
   prowCompany: { fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  prowWork: { fontSize: 13.5, color: C.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  prowWork: { fontSize: 13, color: C.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 3 },
   prowRight: { display: "flex", alignItems: "center", gap: 9, flexShrink: 0 },
-  dueText: { fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
-  taskCount: { display: "flex", alignItems: "center", gap: 3, fontSize: 12.5, color: C.ink3, fontWeight: 600 },
+  dueText: { fontSize: 13.5, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
+  taskCount: { display: "flex", alignItems: "center", gap: 3, fontSize: 12, color: C.ink3, fontWeight: 600 },
 
+  openLinkMeta: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, color: "#6B8AFF", background: "rgba(107,138,255,0.16)", textDecoration: "none", flexShrink: 0 },
   replyPill: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11.5, fontWeight: 700, padding: "2px 7px", borderRadius: 7 },
 
   /* filter */
