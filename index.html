@@ -396,6 +396,18 @@ export default function App() {
       : [{ ...draft, createdAt: Date.now() }, ...projects];
     persist(next); setEditing(null);
   };
+  // 自動保存（ドロワーを閉じずに保存。関数型更新で連続保存の重複を防ぐ）
+  const saveProjectQuiet = (draft) => {
+    setProjects((prev) => {
+      const exists = prev.some((p) => p.id === draft.id);
+      const next = exists
+        ? prev.map((p) => (p.id === draft.id ? draft : p))
+        : [{ ...draft, createdAt: Date.now() }, ...prev];
+      try { window.storage.set(STORE_KEY, JSON.stringify(next)); } catch {}
+      pushCloud(next);
+      return next;
+    });
+  };
   const removeProject = (id) => { persist(projects.filter((p) => p.id !== id)); setConfirmDel(null); setEditing(null); };
   const toggleTask = (pid, tid) =>
     persist(projects.map((p) => p.id !== pid ? p : {
@@ -484,6 +496,7 @@ export default function App() {
           focusTaskId={focusTaskId}
           onClose={() => { setEditing(null); setFocusTaskId(null); }}
           onSave={saveProject}
+          onAutoSave={saveProjectQuiet}
           onDelete={(id) => setConfirmDel(id)}
           confirmDel={confirmDel}
           onConfirmDelete={removeProject}
@@ -533,12 +546,12 @@ function FocusView({ kpi, projects, allProjects, onOpen }) {
 
   const cards = [
     { key: "reply", label: "要返信", value: kpi.needReply, unit: "件", color: "#6B8AFF", Icon: Reply, hot: kpi.needReply > 0 },
-    { key: "weekDue", label: "今週の締切", value: kpi.weekDue, unit: "件", color: "#9AA4B2", Icon: CalendarDays },
+    { key: "weekDue", label: "7日以内の締切", value: kpi.weekDue, unit: "件", color: "#9AA4B2", Icon: CalendarDays },
     { key: "overdue", label: "期限超過", value: kpi.overdue, unit: "件", color: "#FF6B6B", Icon: AlertTriangle, hot: kpi.overdue > 0 },
     { key: "progress", label: "進行中の見込み", value: kpi.revenue ? "¥" + kpi.revenue.toLocaleString("ja-JP") : "—", unit: "", color: "#E8ECF2", Icon: Coins, wide: true, count: kpi.inProgress },
   ];
 
-  const titleOf = { reply: "本日中に返信", weekDue: "今週が締切の案件", overdue: "期限を過ぎている案件", progress: "進行中の案件" };
+  const titleOf = { reply: "本日中に返信", weekDue: "7日以内が締切の案件", overdue: "期限を過ぎている案件", progress: "進行中の案件" };
   const panelColor = cards.find((c) => c.key === openCard)?.color || C.accent;
   const panelList = openCard === "reply" ? replyEntries : (openCard ? lists[openCard] : []);
 
@@ -1082,7 +1095,7 @@ function AddTaskInline({ projects, onAdd, onCancel }) {
 /* ============================================================
    詳細・編集ドロワー
    ============================================================ */
-function Drawer({ draft, focusTaskId, onClose, onSave, onDelete, confirmDel, onConfirmDelete, onCancelDelete }) {
+function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, confirmDel, onConfirmDelete, onCancelDelete }) {
   const [d, setD] = useState(draft);
   const [generating, setGenerating] = useState(false);
   const [extracting, setExtracting] = useState(false);
@@ -1093,10 +1106,30 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onDelete, confirmDel, onC
   const [genError, setGenError] = useState("");
   const [extractMsg, setExtractMsg] = useState("");
   const [copied, setCopied] = useState(false);
+  const [autoSaved, setAutoSaved] = useState(false);
   const isNew = !draft.company && draft.tasks.length === 0;
   const set = (k, v) => setD((p) => ({ ...p, [k]: v }));
   const focusTask = focusTaskId ? d.tasks.find((t) => t.id === focusTaskId) : null;
   const dStrLocalD = (off) => { const x = new Date(); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() + off); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
+
+  // 自動保存：編集するたびに少し待ってから保存（保存ボタン不要）
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return; }
+    const empty = !d.company && !d.work && !d.note && !d.summary && !d.received
+      && (!d.tasks || d.tasks.length === 0) && !d.deadline && !d.reward && !d.replyUrl && !d.replyDraft;
+    if (empty) return; // 新規で実質空なら保存しない
+    const t = setTimeout(() => { onAutoSave && onAutoSave(d); setAutoSaved(true); setTimeout(() => setAutoSaved(false), 1200); }, 600);
+    return () => clearTimeout(t);
+  }, [d]);
+
+  // 閉じる前に未保存の変更を確実に保存
+  const closeWithSave = () => {
+    const empty = !d.company && !d.work && !d.note && !d.summary && !d.received
+      && (!d.tasks || d.tasks.length === 0) && !d.deadline && !d.reward && !d.replyUrl && !d.replyDraft;
+    if (!empty && onAutoSave) onAutoSave(d);
+    onClose();
+  };
 
   async function parseProject() {
     if (!pasteText.trim()) { setParseMsg("案件情報を貼り付けてください。"); return; }
@@ -1135,7 +1168,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onDelete, confirmDel, onC
       if (Object.keys(autoFill).length) setD((p) => ({ ...p, ...autoFill }));
       setPendingDiff(diffs);
       if (diffs.length) setParseMsg(`${Object.keys(autoFill).length}項目を入力。${diffs.length}項目は既存の値と異なります（下で確認）。`);
-      else setParseMsg(`${Object.keys(autoFill).length}項目を読み取って入力しました。内容を確認して保存してください。`);
+      else setParseMsg(`${Object.keys(autoFill).length}項目を読み取って入力しました。内容をご確認ください（自動保存されます）。`);
     } catch {
       setParseMsg("読み取りに失敗しました。通信状況・APIキー設定をご確認ください。");
     } finally { setParsing(false); }
@@ -1273,18 +1306,19 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onDelete, confirmDel, onC
     const dx = t.clientX - swipe.current.x;
     const dy = t.clientY - swipe.current.y;
     const fast = Date.now() - swipe.current.t < 500;
-    if (dx > 90 && Math.abs(dx) > Math.abs(dy) * 1.4 && (dx > 150 || fast)) onClose();
+    if (dx > 90 && Math.abs(dx) > Math.abs(dy) * 1.4 && (dx > 150 || fast)) closeWithSave();
     else setDragX(0);
   };
 
   return (
     <>
-      <div style={S.scrim} onClick={onClose} />
+      <div style={S.scrim} onClick={closeWithSave} />
       <aside style={{ ...S.drawer, ...(dragX ? { transform: `translateX(${dragX}px)`, transition: "none" } : {}) }}
         onTouchStart={onDrawerTouchStart} onTouchMove={onDrawerTouchMove} onTouchEnd={onDrawerTouchEnd}>
         <div style={S.drawerHead}>
           <span style={S.drawerTitle}>{isNew ? "案件を追加" : "案件の詳細"}</span>
-          <button style={S.iconBtn} onClick={onClose}><X size={18} /></button>
+          <span style={{ ...S.autoSaveTag, opacity: autoSaved ? 1 : 0 }}><Check size={12} strokeWidth={3} />保存しました</span>
+          <button style={S.iconBtn} onClick={closeWithSave}><X size={18} /></button>
         </div>
 
         <div style={S.drawerBody}>
@@ -1312,7 +1346,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onDelete, confirmDel, onC
                 <input type="date" style={S.focusDateInput} value={focusTask.due || ""}
                   onChange={(e) => setTask(focusTask.id, "due", e.target.value)} />
               </label>
-              <div style={S.focusTaskNote}>変更は下のタスク一覧と連動します。保存で確定します。</div>
+              <div style={S.focusTaskNote}>変更は自動で保存され、下のタスク一覧と連動します。</div>
             </div>
           )}
 
@@ -1509,8 +1543,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onDelete, confirmDel, onC
             )
           )}
           <div style={{ flex: 1 }} />
-          <button style={S.cancelBtn} onClick={onClose}>キャンセル</button>
-          <button style={S.saveBtn} onClick={() => onSave(d)}>保存</button>
+          <button style={S.saveBtn} onClick={closeWithSave}>閉じる</button>
         </div>
       </aside>
     </>
@@ -2017,8 +2050,9 @@ const S = {
     position: "fixed", top: 0, right: 0, bottom: 0, width: "min(620px, 100vw)", zIndex: 50,
     background: C.bg, display: "flex", flexDirection: "column", boxShadow: "-12px 0 40px rgba(0,0,0,0.4)",
   },
-  drawerHead: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 18px", borderBottom: `1px solid ${C.line}`, background: C.panel },
-  drawerTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 15 },
+  drawerHead: { display: "flex", alignItems: "center", gap: 10, padding: "16px 18px", borderBottom: `1px solid ${C.line}`, background: C.panel },
+  drawerTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 15, marginRight: "auto" },
+  autoSaveTag: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 700, color: "#51CF66", transition: "opacity 0.3s" },
   focusTaskBox: { background: "rgba(107,138,255,0.10)", border: `1px solid rgba(107,138,255,0.35)`, borderRadius: 12, padding: 13, marginBottom: 14, display: "flex", flexDirection: "column", gap: 9 },
   focusTaskHead: { display: "flex", alignItems: "center", gap: 6 },
   focusTaskLabel: { fontSize: 12, fontWeight: 700, color: C.accent },
