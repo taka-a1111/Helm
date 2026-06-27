@@ -569,6 +569,13 @@ export default function App() {
           onCancelDelete={() => setConfirmDel(null)}
         />
       )}
+
+      {/* ===== 右下フローティング＋ボタン（Googleカレンダー方式） ===== */}
+      {!editing && !showSettings && !confirmDel && (
+        <button style={S.fab} onClick={() => setEditing(blankDraft())} title="案件を追加" aria-label="案件を追加">
+          <Plus size={26} strokeWidth={2.6} />
+        </button>
+      )}
     </div>
   );
 }
@@ -1588,53 +1595,11 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
                 <input type="date" style={S.focusDateInput} value={focusTask.due || ""}
                   onChange={(e) => setTask(focusTask.id, "due", e.target.value)} />
               </label>
-              <div style={S.focusTaskNote}>変更は自動で保存され、下のタスク一覧と連動します。</div>
             </div>
           )}
 
-          <div style={S.parseBox}>
-            <div style={S.parseBoxHead}>
-              <Sparkles size={14} color={C.accent} strokeWidth={2.3} />
-              <span style={S.parseBoxTitle}>貼り付けて{isNew ? "自動入力" : "再読み取り"}</span>
-            </div>
-            <textarea style={{ ...S.input, minHeight: 70, resize: "vertical" }} value={pasteText}
-              placeholder="募集文・メッセージなどをそのまま貼り付け"
-              onChange={(e) => setPasteText(e.target.value)} />
-            <button style={{ ...S.genBtn, ...(parsing ? S.genBtnBusy : {}) }} onClick={parseProject} disabled={parsing}>
-              {parsing ? <><span style={S.spinner} />読み取り中…</> : <><Sparkles size={14} strokeWidth={2.4} />読み取って入力</>}
-            </button>
-            {parseMsg && <div style={S.extractMsg}>{parseMsg}</div>}
-
-            {pendingDiff.length > 0 && (
-              <div style={S.diffBox}>
-                <div style={S.diffHead}>
-                  <AlertTriangle size={13} color="#6B8AFF" strokeWidth={2.4} />
-                  <span style={S.diffTitle}>読み取り結果（確認して反映）</span>
-                  <button style={S.diffDismissAll} onClick={dismissAllDiff}>取消</button>
-                  <button style={S.diffApplyAll} onClick={applyAllDiff}>すべて反映</button>
-                </div>
-                {pendingDiff.map((x) => (
-                  <div key={x.field} style={S.diffRow}>
-                    <div style={S.diffRowTop}>
-                      <span style={S.diffLabel}>{x.label}{x.isNew && <span style={S.diffNewTag}>新規</span>}</span>
-                      <button style={S.diffDismiss} onClick={() => dismissDiff(x.field)}>無視</button>
-                      <button style={S.diffApply} onClick={() => applyDiff(x.field)}>反映</button>
-                    </div>
-                    <div style={S.diffVals}>
-                      {!x.isNew && <>
-                        <span style={S.diffCur}>{x.current.length > 60 ? x.current.slice(0, 60) + "…" : x.current}</span>
-                        <ChevronRight size={13} color={C.ink3} />
-                      </>}
-                      <span style={S.diffNext}>{x.next.length > 60 ? x.next.slice(0, 60) + "…" : x.next}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <Field label="会社名 / クライアント">
-            <input style={S.input} value={d.company} placeholder="例：〇〇株式会社"
+          <Field label="案件名">
+            <input style={S.input} value={d.company} placeholder="案件名"
               onKeyDown={enterClose}
               onChange={(e) => set("company", e.target.value)} />
           </Field>
@@ -1651,12 +1616,6 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
                 onChange={(e) => set("reward", e.target.value)} />
             </Field>
           </div>
-
-          <Field label="業務内容">
-            <textarea style={{ ...S.input, minHeight: 56, resize: "vertical" }} value={d.work}
-              placeholder="例：コーポレートサイト制作（Next.js）"
-              onChange={(e) => set("work", e.target.value)} />
-          </Field>
 
           <div style={S.row2}>
             <Field label="ステータス">
@@ -1678,19 +1637,10 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
               onChange={(e) => set("deadline", e.target.value)} />
           </Field>
 
-          <Field label="メモ">
-            <textarea style={{ ...S.input, minHeight: 48, resize: "vertical" }} value={d.note}
-              placeholder="補足・連絡事項など"
+          <Field label="詳細">
+            <textarea style={{ ...S.input, minHeight: 56, resize: "vertical" }} value={d.note}
+              placeholder="詳細"
               onChange={(e) => set("note", e.target.value)} />
-          </Field>
-
-          <Field label="案件の経緯メモ（返信生成の文脈に使用）">
-            <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={d.summary}
-              placeholder="依頼内容・決まったこと・未決事項など。ここに書いた経緯を踏まえて返信案を作ります。"
-              onChange={(e) => set("summary", e.target.value)} />
-            <button style={{ ...S.summaryBtn, ...(summarizing ? S.genBtnBusy : {}) }} onClick={summarizeContext} disabled={summarizing}>
-              {summarizing ? <><span style={S.spinnerDark} />まとめ中…</> : <><Sparkles size={13} strokeWidth={2.4} />やり取りから経緯を自動でまとめる</>}
-            </button>
           </Field>
 
           {/* ===== やり取り（AI返信案） ===== */}
@@ -1705,13 +1655,13 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
 
             <Field label="相手から届いたメッセージ">
               <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={d.received}
-                placeholder="Chatworkやクラウドワークスで届いた本文を貼り付け"
+                placeholder="届いたメッセージ"
                 onChange={(e) => set("received", e.target.value)} />
             </Field>
 
             <Field label="返信先URL">
               <input style={S.input} value={d.replyUrl} type="url"
-                placeholder={urlHint(d.platform)}
+                placeholder="URL"
                 onKeyDown={enterClose}
                 onChange={(e) => set("replyUrl", e.target.value)} />
             </Field>
@@ -1729,7 +1679,6 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
                 {extracting ? <><span style={S.spinnerDark} />抽出中…</> : <><ListPlus size={14} strokeWidth={2.4} />やることを抽出</>}
               </button>
             </div>
-            <div style={S.assistNote}>これまでのやり取り（直近3往復）の文脈を踏まえ、用件が複数あってもすべてに漏れなく答える1通の返信案を作成します。「やることを抽出」は対応すべきことをタスク化します。</div>
             {extractMsg && <div style={S.extractMsg}>{extractMsg}</div>}
             {genError && <div style={S.genError}>{genError}</div>}
 
@@ -2182,6 +2131,11 @@ const S = {
   addBtnIcon: {
     display: "flex", alignItems: "center", justifyContent: "center", border: "none",
     background: C.accent, color: "#fff", padding: 8, borderRadius: 10,
+  },
+  fab: {
+    position: "fixed", right: 18, bottom: 22, width: 58, height: 58, borderRadius: 18,
+    background: C.accent, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+    border: "none", boxShadow: "0 6px 18px rgba(0,0,0,0.45)", zIndex: 30, cursor: "pointer",
   },
   addLabel: {},
 
