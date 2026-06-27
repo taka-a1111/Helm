@@ -227,6 +227,15 @@ function normalizeProjects(arr) {
 }
 // 未対応の返信タスク
 const replyTasksOf = (p) => (p.tasks || []).filter((t) => t.kind === "reply" && !t.done);
+// 案件の締切候補（納期＋未完了タスクの期限）を日数の配列で返す
+const dueDaysList = (p) => {
+  const arr = [];
+  const dl = daysUntil(p.deadline); if (dl !== null) arr.push(dl);
+  (p.tasks || []).forEach((t) => {
+    if (!t.done && t.kind !== "reply") { const n = daysUntil(t.due); if (n !== null) arr.push(n); }
+  });
+  return arr;
+};
 
 /* Claude呼び出し。APIキーがあればブラウザ直アクセス（HTML版）、なければプロキシ（Claudeアプリ版） */
 async function callClaude({ system, user, maxTokens = 1000 }) {
@@ -430,8 +439,8 @@ export default function App() {
   const active = useMemo(() => projects.filter((p) => p.status !== "完了" && p.id !== INBOX_ID), [projects]);
   const kpi = useMemo(() => {
     const needReply = active.reduce((s, p) => s + replyTasksOf(p).length, 0);
-    const weekDue = active.filter((p) => { const n = daysUntil(p.deadline); return n !== null && n >= 0 && n <= 7; }).length;
-    const overdue = active.filter((p) => { const n = daysUntil(p.deadline); return n !== null && n < 0; }).length;
+    const weekDue = active.filter((p) => dueDaysList(p).some((n) => n >= 0 && n <= 7)).length;
+    const overdue = active.filter((p) => dueDaysList(p).some((n) => n < 0)).length;
     const revenue = active.reduce((s, p) => s + (Number(p.reward) || 0), 0);
     return { needReply, weekDue, overdue, inProgress: active.length, revenue };
   }, [active]);
@@ -449,7 +458,7 @@ export default function App() {
 
       {/* ===== Header ===== */}
       <header style={S.header}>
-        <div style={S.brand}>
+        <div style={{ ...S.brand, cursor: "pointer" }} onClick={() => { if (typeof window !== "undefined") window.location.reload(); }} title="タップで再読み込み">
           <div style={S.brandMark}>H</div>
           <div>
             <div style={S.brandTitle}>Helm</div>
@@ -536,11 +545,12 @@ function FocusView({ kpi, projects, allProjects, onOpen }) {
     });
   const doneCount = (allProjects || projects).filter((p) => p.id !== INBOX_ID && p.status === "完了").length;
 
+  const minDue = (p) => { const a = dueDaysList(p); return a.length ? Math.min(...a) : Infinity; };
   const lists = {
-    weekDue: projects.filter((p) => { const n = daysUntil(p.deadline); return n !== null && n >= 0 && n <= 7; })
-      .sort((a, b) => daysUntil(a.deadline) - daysUntil(b.deadline)),
-    overdue: projects.filter((p) => { const n = daysUntil(p.deadline); return n !== null && n < 0; })
-      .sort((a, b) => daysUntil(a.deadline) - daysUntil(b.deadline)),
+    weekDue: projects.filter((p) => p.status !== "完了" && p.id !== INBOX_ID && dueDaysList(p).some((n) => n >= 0 && n <= 7))
+      .sort((a, b) => minDue(a) - minDue(b)),
+    overdue: projects.filter((p) => p.status !== "完了" && p.id !== INBOX_ID && dueDaysList(p).some((n) => n < 0))
+      .sort((a, b) => minDue(a) - minDue(b)),
     progress: [...projects].sort((a, b) => (Number(b.reward) || 0) - (Number(a.reward) || 0)),
   };
 
@@ -623,6 +633,9 @@ function FocusView({ kpi, projects, allProjects, onOpen }) {
 
           {openCard !== "reply" && panelList.map((p) => {
             const dm = dueMeta(p.deadline);
+            const _dd = dueDaysList(p);
+            const nd = _dd.length ? Math.min(..._dd) : null;
+            const ndColor = nd === null ? C.ink3 : (nd <= 3 ? "#FF6B6B" : "#9AA4B2");
             return (
               <div key={p.id} style={S.replyItem}>
                 <button style={S.replyItemMain} onClick={() => onOpen(p)}>
@@ -636,8 +649,8 @@ function FocusView({ kpi, projects, allProjects, onOpen }) {
                       </span>
                     )}
                   </span>
-                  {(openCard === "weekDue" || openCard === "overdue") && p.deadline && (
-                    <span style={{ ...S.replyItemDue, color: dm.color }}>{dm.n < 0 ? `${-dm.n}日超過` : dm.n === 0 ? "今日" : `あと${dm.n}日`}</span>
+                  {(openCard === "weekDue" || openCard === "overdue") && nd !== null && (
+                    <span style={{ ...S.replyItemDue, color: ndColor }}>{nd < 0 ? `${-nd}日超過` : nd === 0 ? "今日" : `あと${nd}日`}</span>
                   )}
                 </button>
                 {p.replyUrl && (() => { const li = linkInfo(p.replyUrl); return (
@@ -1314,39 +1327,53 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
   // 端を内側にスワイプ（横方向に大きく動かす）と閉じる
   const swipe = useRef({ x: 0, y: 0, t: 0 });
   const [dragX, setDragX] = useState(0);
+  const [dragY, setDragY] = useState(0);
+  const bodyRef = useRef(null);
   const onDrawerTouchStart = (e) => {
     const t = e.touches[0];
-    swipe.current = { x: t.clientX, y: t.clientY, t: Date.now() };
-    setDragX(0);
+    swipe.current = { x: t.clientX, y: t.clientY, t: Date.now(), dir: null, top: (bodyRef.current ? bodyRef.current.scrollTop : 0) };
+    setDragX(0); setDragY(0);
   };
   const onDrawerTouchMove = (e) => {
     const t = e.touches[0];
     const dx = t.clientX - swipe.current.x;
     const dy = t.clientY - swipe.current.y;
-    if (dx > 0 && Math.abs(dx) > Math.abs(dy)) setDragX(dx);
+    if (!swipe.current.dir && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+      swipe.current.dir = Math.abs(dx) > Math.abs(dy) ? "h" : "v";
+    }
+    if (swipe.current.dir === "h") {
+      if (dx > 0) setDragX(dx);
+    } else if (swipe.current.dir === "v") {
+      // 本文が最上部のときだけ、下プルで閉じる動き
+      if (dy > 0 && swipe.current.top <= 0) setDragY(dy);
+    }
   };
   const onDrawerTouchEnd = (e) => {
     const t = (e.changedTouches && e.changedTouches[0]) || null;
-    if (!t) { setDragX(0); return; }
+    if (!t) { setDragX(0); setDragY(0); return; }
     const dx = t.clientX - swipe.current.x;
     const dy = t.clientY - swipe.current.y;
     const fast = Date.now() - swipe.current.t < 500;
-    if (dx > 90 && Math.abs(dx) > Math.abs(dy) * 1.4 && (dx > 150 || fast)) closeWithSave();
-    else setDragX(0);
+    if (swipe.current.dir === "h" && dx > 90 && Math.abs(dx) > Math.abs(dy) * 1.4 && (dx > 150 || fast)) closeWithSave();
+    else if (swipe.current.dir === "v" && swipe.current.top <= 0 && dy > 110 && (dy > 180 || fast)) closeWithSave();
+    else { setDragX(0); setDragY(0); }
   };
+  const dragStyle = dragX ? { transform: `translateX(${dragX}px)`, transition: "none" }
+    : dragY ? { transform: `translateY(${dragY}px)`, transition: "none" } : {};
 
   return (
     <>
       <div style={S.scrim} onClick={closeWithSave} />
-      <aside style={{ ...S.drawer, ...(dragX ? { transform: `translateX(${dragX}px)`, transition: "none" } : {}) }}
+      <aside style={{ ...S.drawer, ...dragStyle }}
         onTouchStart={onDrawerTouchStart} onTouchMove={onDrawerTouchMove} onTouchEnd={onDrawerTouchEnd}>
         <div style={S.drawerHead}>
+          <span style={S.drawerGrip} />
           <span style={S.drawerTitle}>{isNew ? "案件を追加" : "案件の詳細"}</span>
           <span style={{ ...S.autoSaveTag, opacity: autoSaved ? 1 : 0 }}><Check size={12} strokeWidth={3} />保存しました</span>
           <button style={S.iconBtn} onClick={closeWithSave}><X size={18} /></button>
         </div>
 
-        <div style={S.drawerBody}>
+        <div style={S.drawerBody} ref={bodyRef}>
           {focusTask && (
             <div style={S.focusTaskBox}>
               <div style={S.focusTaskHead}>
@@ -2086,7 +2113,8 @@ const S = {
     position: "fixed", top: 0, right: 0, bottom: 0, width: "min(620px, 100vw)", zIndex: 50,
     background: C.bg, display: "flex", flexDirection: "column", boxShadow: "-12px 0 40px rgba(0,0,0,0.4)",
   },
-  drawerHead: { display: "flex", alignItems: "center", gap: 10, padding: "16px 18px", borderBottom: `1px solid ${C.line}`, background: C.panel },
+  drawerHead: { position: "relative", display: "flex", alignItems: "center", gap: 10, padding: "16px 18px", borderBottom: `1px solid ${C.line}`, background: C.panel },
+  drawerGrip: { position: "absolute", top: 6, left: "50%", transform: "translateX(-50%)", width: 36, height: 4, borderRadius: 3, background: C.line },
   drawerTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 15, marginRight: "auto" },
   autoSaveTag: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 700, color: "#51CF66", transition: "opacity 0.3s" },
   focusTaskBox: { background: "rgba(107,138,255,0.10)", border: `1px solid rgba(107,138,255,0.35)`, borderRadius: 12, padding: 13, marginBottom: 14, display: "flex", flexDirection: "column", gap: 9 },
