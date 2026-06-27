@@ -761,32 +761,56 @@ function ProjectCard({ p, onOpen }) {
   const d = dueMeta(p.deadline);
   const replyN = replyTasksOf(p).length;
   const li = linkInfo(p.replyUrl);
-  const done = p.tasks.filter((t) => t.done).length;
-  const total = p.tasks.length;
+  const openTasks = p.tasks
+    .filter((t) => !t.done && t.kind !== "reply")
+    .sort((a, b) => {
+      const an = daysUntil(a.due), bn = daysUntil(b.due);
+      if (an === null && bn === null) return 0;
+      if (an === null) return 1; if (bn === null) return -1;
+      return an - bn;
+    });
+  const showTasks = openTasks.slice(0, 3);
+  const moreTasks = openTasks.length - showTasks.length;
+  const total = p.tasks.filter((t) => t.kind !== "reply").length;
+  const done = p.tasks.filter((t) => t.kind !== "reply" && t.done).length;
   return (
     <button style={S.card} onClick={() => onOpen(p)}>
-      <div style={{ ...S.cardBar, background: PLATFORMS[p.platform] || "#8E97A6" }} />
-      <div style={S.cardInner}>
-        <div style={S.cardHead}>
-          <PlatformChip name={p.platform} />
-          <span style={{ ...S.statusDot, color: STATUS_META[p.status] }}>● {p.status}</span>
-        </div>
-        <div style={S.cardCompany}>{p.company}</div>
-        <div style={S.cardWork}>{p.work || "（業務内容未設定）"}</div>
+      <div style={S.cardHead}>
+        <PlatformChip name={p.platform} small />
+        <span style={S.cardStatus}>{p.status}</span>
+        {replyN > 0 && (
+          <span style={S.cardReplyPill}><Reply size={11} strokeWidth={2.4} />要返信{replyN}</span>
+        )}
+      </div>
 
-        <div style={S.cardMeta}>
-          <span style={S.cardReward}>{yen(Number(p.reward))}</span>
-          <span style={{ ...S.cardDue, color: d.color }}>
-            <CalendarDays size={12} strokeWidth={2.2} />{d.text}
-          </span>
-        </div>
+      <div style={S.cardCompany}>{p.company}</div>
+      {p.work && <div style={S.cardWork}>{p.work}</div>}
 
+      <div style={S.cardMetaRow}>
+        <span style={S.cardReward}>{yen(Number(p.reward))}</span>
+        {p.deadline
+          ? <span style={{ ...S.cardDue, color: d.color }}><CalendarDays size={12} strokeWidth={2.2} />{d.text}</span>
+          : <span style={S.cardDueNone}>期限未設定</span>}
+      </div>
+
+      {showTasks.length > 0 && (
+        <div style={S.cardTaskList}>
+          {showTasks.map((t) => {
+            const td = dueMeta(t.due);
+            return (
+              <div key={t.id} style={S.cardTaskRow}>
+                <span style={S.cardTaskDot} />
+                <span style={S.cardTaskTitle}>{t.title || "（無題）"}</span>
+                {t.due && <span style={{ ...S.cardTaskDue, color: td.color }}>{td.text}</span>}
+              </div>
+            );
+          })}
+          {moreTasks > 0 && <div style={S.cardTaskMore}>ほか {moreTasks} 件</div>}
+        </div>
+      )}
+
+      {(li || total > 0) && (
         <div style={S.cardFoot}>
-          {replyN > 0 && (
-            <span style={{ ...S.replyPill, color: "#6B8AFF", background: "rgba(107,138,255,0.15)" }}>
-              <Reply size={11} strokeWidth={2.4} />要返信{replyN}
-            </span>
-          )}
           {li && (
             <a href={p.replyUrl} target="_blank" rel="noopener noreferrer"
               style={{ ...S.openLinkCard, color: li.color, background: li.color + "22" }}
@@ -794,14 +818,15 @@ function ProjectCard({ p, onOpen }) {
               <ExternalLink size={12} strokeWidth={2.4} />{li.short}
             </a>
           )}
+          <div style={{ flex: 1 }} />
           {total > 0 && (
-            <span style={S.cardTasks}>
-              <CheckCircle2 size={12} strokeWidth={2.2} color={done === total ? "#51CF66" : "#616B7A"} />
+            <span style={S.cardTasksCount}>
+              <CheckCircle2 size={13} strokeWidth={2.2} color={done === total ? "#51CF66" : "#616B7A"} />
               {done}/{total}
             </span>
           )}
         </div>
-      </div>
+      )}
     </button>
   );
 }
@@ -2018,20 +2043,31 @@ const S = {
   /* card grid */
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 13, alignItems: "stretch" },
   card: {
-    position: "relative", textAlign: "left", padding: 0, overflow: "hidden", height: "100%",
-    display: "flex", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, cursor: "pointer",
+    position: "relative", textAlign: "left", overflow: "hidden", height: "100%",
+    display: "flex", flexDirection: "column", gap: 0, padding: "15px 16px",
+    background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, cursor: "pointer",
   },
-  cardBar: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
-  cardInner: { flex: 1, display: "flex", flexDirection: "column", padding: "14px 15px 13px 18px" },
-  cardHead: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 9 },
+  cardBar: { display: "none" },
+  cardInner: { flex: 1, display: "flex", flexDirection: "column" },
+  cardHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10 },
+  cardStatus: { fontSize: 12, fontWeight: 700, color: C.ink3, marginLeft: 2 },
+  cardReplyPill: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.15)", padding: "2px 8px", borderRadius: 7, marginLeft: "auto" },
   statusDot: { fontSize: 11.5, fontWeight: 700 },
-  cardCompany: { fontWeight: 700, fontSize: 14.5, lineHeight: 1.3, marginBottom: 3 },
-  cardWork: { fontSize: 14, color: C.ink2, lineHeight: 1.45, marginBottom: 12, minHeight: 34,
+  cardCompany: { fontFamily: F.disp, fontWeight: 800, fontSize: 17, letterSpacing: 0.2, lineHeight: 1.3, marginBottom: 3 },
+  cardWork: { fontSize: 13, color: C.ink2, lineHeight: 1.5, marginBottom: 13,
     display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" },
-  cardMeta: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 11 },
-  cardReward: { fontFamily: F.disp, fontWeight: 700, fontSize: 16, fontVariantNumeric: "tabular-nums" },
-  cardDue: { display: "flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, fontFamily: F.disp },
-  cardFoot: { display: "flex", alignItems: "center", gap: 8, paddingTop: 11, marginTop: "auto", borderTop: `1px solid ${C.line}` },
+  cardMetaRow: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, paddingTop: 12, borderTop: `1px solid ${C.line}` },
+  cardReward: { fontFamily: F.disp, fontWeight: 800, fontSize: 19, fontVariantNumeric: "tabular-nums", letterSpacing: 0.3 },
+  cardDue: { display: "flex", alignItems: "center", gap: 4, fontSize: 13, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
+  cardDueNone: { fontSize: 12, color: C.ink3, fontWeight: 600, whiteSpace: "nowrap" },
+  cardTaskList: { display: "flex", flexDirection: "column", gap: 7, marginTop: 13 },
+  cardTaskRow: { display: "flex", alignItems: "center", gap: 8 },
+  cardTaskDot: { width: 6, height: 6, borderRadius: "50%", border: `1.5px solid ${C.ink3}`, flexShrink: 0 },
+  cardTaskTitle: { flex: 1, minWidth: 0, fontSize: 13, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  cardTaskDue: { fontSize: 12, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap", flexShrink: 0 },
+  cardTaskMore: { fontSize: 12, color: C.ink3, fontWeight: 600, paddingLeft: 14 },
+  cardFoot: { display: "flex", alignItems: "center", gap: 8, paddingTop: 12, marginTop: 13, borderTop: `1px solid ${C.line}` },
+  cardTasksCount: { display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, color: C.ink3, fontWeight: 700, fontFamily: F.disp },
   cardTasks: { display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, color: C.ink3, fontWeight: 600, marginLeft: "auto", fontFamily: F.disp },
 
   /* tasks view */
