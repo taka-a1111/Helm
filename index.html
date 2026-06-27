@@ -155,7 +155,7 @@ const dStr = (offset = 0) => {
 };
 // 返信タスク（当日期限）。msg はクライアントから届いた原文をそのまま保持
 const reply = (title, msg = "") => ({ id: uid(), title, done: false, due: dStr(0), lane: "today", kind: "reply", msg });
-const task = (title, offset, lane = "today", done = false) => ({ id: uid(), title, done, due: offset == null ? "" : dStr(offset), lane, kind: "task" });
+const task = (title, offset, lane = "today", done = false) => ({ id: uid(), title, done, due: offset == null ? "" : dStr(offset), start: "", lane, kind: "task" });
 
 function makeSample() {
   // 本番初期データ。Gmail（クラウドワークス通知）から確認できた進行中案件のみ骨組みで登録。
@@ -220,28 +220,33 @@ function normalizeProjects(arr) {
   let list = arr.map((p) => ({
     ...p,
     received: p.received ?? "", replyDraft: p.replyDraft ?? "", repliedAt: p.repliedAt ?? null, replyUrl: p.replyUrl ?? "", replyHistory: p.replyHistory ?? [], summary: p.summary ?? "",
-    tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "" })),
+    tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "" })),
   }));
   if (!list.some((p) => p.id === INBOX_ID)) list = [...list, makeInbox()];
   return list;
 }
 // 未対応の返信タスク
 const replyTasksOf = (p) => (p.tasks || []).filter((t) => t.kind === "reply" && !t.done);
-// 案件の締切候補（納期＋未完了タスクの期限）を日数の配列で返す
+// タスクの判定用の日付：いつやるか（start／実施日）を優先、なければ期限（due）
+const taskJudgeDate = (t) => t.start || t.due || "";
+// 案件の締切候補（納期＋未完了タスクの実施日/期限）を日数の配列で返す
 const dueDaysList = (p) => {
   const arr = [];
   const dl = daysUntil(p.deadline); if (dl !== null) arr.push(dl);
   (p.tasks || []).forEach((t) => {
-    if (!t.done && t.kind !== "reply") { const n = daysUntil(t.due); if (n !== null) arr.push(n); }
+    if (!t.done && t.kind !== "reply") { const n = daysUntil(taskJudgeDate(t)); if (n !== null) arr.push(n); }
   });
   return arr;
 };
 // 締切候補を「名前＋日数」で返す（一覧でタスク名を出すため）
 const dueItemsOf = (p) => {
   const arr = [];
-  const dl = daysUntil(p.deadline); if (dl !== null) arr.push({ n: dl, label: "納期", isDeadline: true });
+  const dl = daysUntil(p.deadline); if (dl !== null) arr.push({ n: dl, label: "納期", isDeadline: true, byStart: false });
   (p.tasks || []).forEach((t) => {
-    if (!t.done && t.kind !== "reply") { const n = daysUntil(t.due); if (n !== null) arr.push({ n, label: t.title || "（無題のタスク）", isDeadline: false }); }
+    if (!t.done && t.kind !== "reply") {
+      const n = daysUntil(taskJudgeDate(t));
+      if (n !== null) arr.push({ n, label: t.title || "（無題のタスク）", isDeadline: false, byStart: !!t.start });
+    }
   });
   return arr.sort((a, b) => a.n - b.n);
 };
@@ -451,7 +456,7 @@ export default function App() {
     }));
   const addTaskToLane = (pid, lane, title) =>
     persist(projects.map((p) => p.id !== pid ? p : {
-      ...p, tasks: [...p.tasks, { id: uid(), title, done: false, due: "", lane, kind: "task" }],
+      ...p, tasks: [...p.tasks, { id: uid(), title, done: false, due: "", start: "", lane, kind: "task" }],
     }));
 
   /* ---- derived ---- */
@@ -674,7 +679,7 @@ function FocusView({ kpi, projects, allProjects, onOpen }) {
                       <span style={S.dueTaskList}>
                         {dueItems.map((it, idx) => (
                           <span key={idx} style={S.dueTaskRow}>
-                            <span style={S.dueTaskName}>{it.isDeadline ? "📅 " : ""}{it.label}</span>
+                            <span style={S.dueTaskName}>{it.isDeadline ? "📅 " : it.byStart ? "▶ " : ""}{it.label}</span>
                             <span style={{ ...S.dueTaskDays, color: it.n <= 3 ? "#FF6B6B" : "#9AA4B2" }}>{dDays(it.n)}</span>
                           </span>
                         ))}
@@ -806,7 +811,7 @@ function ProjectCard({ p, onOpen }) {
   const openTasks = p.tasks
     .filter((t) => !t.done && t.kind !== "reply")
     .sort((a, b) => {
-      const an = daysUntil(a.due), bn = daysUntil(b.due);
+      const an = daysUntil(taskJudgeDate(a)), bn = daysUntil(taskJudgeDate(b));
       if (an === null && bn === null) return 0;
       if (an === null) return 1; if (bn === null) return -1;
       return an - bn;
@@ -838,12 +843,15 @@ function ProjectCard({ p, onOpen }) {
       {showTasks.length > 0 && (
         <div style={S.cardTaskList}>
           {showTasks.map((t) => {
-            const td = dueMeta(t.due);
+            const sd = t.start ? dueMeta(t.start) : null;
+            const td = t.due ? dueMeta(t.due) : null;
             return (
               <div key={t.id} style={S.cardTaskRow}>
                 <span style={S.cardTaskDot} />
                 <span style={S.cardTaskTitle}>{t.title || "（無題）"}</span>
-                {t.due && <span style={{ ...S.cardTaskDue, color: td.color }}>{td.text}</span>}
+                {sd
+                  ? <span style={{ ...S.cardTaskDue, color: sd.color }}>▶{sd.text}</span>
+                  : td && <span style={{ ...S.cardTaskDue, color: td.color }}>{td.text}</span>}
               </div>
             );
           })}
@@ -1197,6 +1205,10 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
     if (!empty && onAutoSave) onAutoSave(d);
     onClose();
   };
+  // 単一行の入力欄でEnter → 確定して閉じる（IME変換中は無視）
+  const enterClose = (e) => {
+    if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); closeWithSave(); }
+  };
 
   async function parseProject() {
     if (!pasteText.trim()) { setParseMsg("案件情報を貼り付けてください。"); return; }
@@ -1221,21 +1233,18 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
         summary: (obj.summary || "").trim(),
       };
       const labels = { company: "会社名", platform: "契約先", work: "業務内容", reward: "報酬", deadline: "納期", replyUrl: "返信先URL", received: "届いたメッセージ", summary: "経緯メモ" };
-      const autoFill = {};   // 空欄に入れる
-      const diffs = [];      // 既存値と異なる（確認が必要）
+      const diffs = [];   // 抽出できた項目はすべて確認リストへ（自動反映しない）
       Object.keys(parsed).forEach((f) => {
         const nv = parsed[f];
         if (!nv) return;                       // 抽出できなかった項目は無視
         const cur = (d[f] || "").toString();
-        if (!cur) { autoFill[f] = nv; }        // 現在が空 → 自動で埋める
-        else if (cur !== nv && !(f === "platform" && nv === "その他")) {
-          diffs.push({ field: f, label: labels[f], current: cur, next: nv });
-        }
+        if (cur === nv) return;                // 変化なし
+        if (f === "platform" && nv === "その他" && cur) return;
+        diffs.push({ field: f, label: labels[f], current: cur, next: nv, isNew: !cur });
       });
-      if (Object.keys(autoFill).length) setD((p) => ({ ...p, ...autoFill }));
       setPendingDiff(diffs);
-      if (diffs.length) setParseMsg(`${Object.keys(autoFill).length}項目を入力。${diffs.length}項目は既存の値と異なります（下で確認）。`);
-      else setParseMsg(`${Object.keys(autoFill).length}項目を読み取って入力しました。内容をご確認ください（自動保存されます）。`);
+      if (diffs.length) setParseMsg(`${diffs.length}項目を読み取りました。内容を確認して「反映」を押してください。`);
+      else setParseMsg("反映できる新しい情報は見つかりませんでした。");
     } catch {
       setParseMsg("読み取りに失敗しました。通信状況・APIキー設定をご確認ください。");
     } finally { setParsing(false); }
@@ -1249,9 +1258,12 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
   const applyAllDiff = () => {
     setD((p) => { const n = { ...p }; pendingDiff.forEach((x) => { n[x.field] = x.next; }); return n; });
     setPendingDiff([]);
+    setParseMsg("反映しました。");
   };
+  const dismissDiff = (f) => setPendingDiff((arr) => arr.filter((x) => x.field !== f));
+  const dismissAllDiff = () => { setPendingDiff([]); setParseMsg("反映をキャンセルしました。"); };
 
-  const addTask = () => set("tasks", [...d.tasks, { id: uid(), title: "", done: false, due: "", lane: "later", kind: "task" }]);
+  const addTask = () => set("tasks", [...d.tasks, { id: uid(), title: "", done: false, due: "", start: "", lane: "later", kind: "task" }]);
   const setTask = (id, k, v) => set("tasks", d.tasks.map((t) => t.id === id ? { ...t, [k]: v } : t));
   const delTask = (id) => set("tasks", d.tasks.filter((t) => t.id !== id));
 
@@ -1313,7 +1325,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
       const fresh = titles.filter((t) => !existing.has(norm(t)));
       const dup = titles.length - fresh.length;
       if (fresh.length) {
-        const newTasks = fresh.map((title) => ({ id: uid(), title, done: false, due: "", lane: "today", kind: "task" }));
+        const newTasks = fresh.map((title) => ({ id: uid(), title, done: false, due: "", start: "", lane: "today", kind: "task" }));
         set("tasks", [...d.tasks, ...newTasks]);
         setExtractMsg(`${fresh.length}件のタスクを追加しました（「今日」レーン）。${dup ? `既存と重複の${dup}件は追加しませんでした。` : ""}`);
       } else if (titles.length) {
@@ -1453,18 +1465,22 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
               <div style={S.diffBox}>
                 <div style={S.diffHead}>
                   <AlertTriangle size={13} color="#6B8AFF" strokeWidth={2.4} />
-                  <span style={S.diffTitle}>既存の値と異なります</span>
-                  <button style={S.diffApplyAll} onClick={applyAllDiff}>すべて更新</button>
+                  <span style={S.diffTitle}>読み取り結果（確認して反映）</span>
+                  <button style={S.diffDismissAll} onClick={dismissAllDiff}>取消</button>
+                  <button style={S.diffApplyAll} onClick={applyAllDiff}>すべて反映</button>
                 </div>
                 {pendingDiff.map((x) => (
                   <div key={x.field} style={S.diffRow}>
                     <div style={S.diffRowTop}>
-                      <span style={S.diffLabel}>{x.label}</span>
-                      <button style={S.diffApply} onClick={() => applyDiff(x.field)}>更新</button>
+                      <span style={S.diffLabel}>{x.label}{x.isNew && <span style={S.diffNewTag}>新規</span>}</span>
+                      <button style={S.diffDismiss} onClick={() => dismissDiff(x.field)}>無視</button>
+                      <button style={S.diffApply} onClick={() => applyDiff(x.field)}>反映</button>
                     </div>
                     <div style={S.diffVals}>
-                      <span style={S.diffCur}>{x.current ? (x.current.length > 60 ? x.current.slice(0, 60) + "…" : x.current) : "（空）"}</span>
-                      <ChevronRight size={13} color={C.ink3} />
+                      {!x.isNew && <>
+                        <span style={S.diffCur}>{x.current.length > 60 ? x.current.slice(0, 60) + "…" : x.current}</span>
+                        <ChevronRight size={13} color={C.ink3} />
+                      </>}
                       <span style={S.diffNext}>{x.next.length > 60 ? x.next.slice(0, 60) + "…" : x.next}</span>
                     </div>
                   </div>
@@ -1475,6 +1491,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
 
           <Field label="会社名 / クライアント">
             <input style={S.input} value={d.company} placeholder="例：〇〇株式会社"
+              onKeyDown={enterClose}
               onChange={(e) => set("company", e.target.value)} />
           </Field>
 
@@ -1486,6 +1503,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
             </Field>
             <Field label="報酬（円）">
               <input style={S.input} type="number" value={d.reward} placeholder="0"
+                onKeyDown={enterClose}
                 onChange={(e) => set("reward", e.target.value)} />
             </Field>
           </div>
@@ -1511,6 +1529,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
 
           <Field label="期限">
             <input style={S.input} type="date" value={d.deadline}
+              onKeyDown={enterClose}
               onChange={(e) => set("deadline", e.target.value)} />
           </Field>
 
@@ -1548,6 +1567,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
             <Field label="返信先URL">
               <input style={S.input} value={d.replyUrl} type="url"
                 placeholder={urlHint(d.platform)}
+                onKeyDown={enterClose}
                 onChange={(e) => set("replyUrl", e.target.value)} />
             </Field>
             {d.replyUrl && (() => { const li = linkInfo(d.replyUrl); return (
@@ -1598,14 +1618,26 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
             {d.tasks.length === 0 && <div style={S.taskEmpty}>タスクはまだありません</div>}
             {d.tasks.map((t) => (
               <div key={t.id} style={S.taskEditRow}>
-                <button style={S.checkBtn} onClick={() => setTask(t.id, "done", !t.done)}>
-                  {t.done ? <CheckCircle2 size={18} color="#51CF66" /> : <Circle size={18} color="#3A434F" />}
-                </button>
-                <input style={{ ...S.taskInput, ...(t.done ? S.trowDone : {}) }} value={t.title}
-                  placeholder="やること" onChange={(e) => setTask(t.id, "title", e.target.value)} />
-                <input style={S.taskDate} type="date" value={t.due}
-                  onChange={(e) => setTask(t.id, "due", e.target.value)} />
-                <button style={S.iconBtnSm} onClick={() => delTask(t.id)}><Trash2 size={14} color="#616B7A" /></button>
+                <div style={S.taskEditTop}>
+                  <button style={S.checkBtn} onClick={() => setTask(t.id, "done", !t.done)}>
+                    {t.done ? <CheckCircle2 size={18} color="#51CF66" /> : <Circle size={18} color="#3A434F" />}
+                  </button>
+                  <input style={{ ...S.taskInput, ...(t.done ? S.trowDone : {}) }} value={t.title}
+                    placeholder="やること" onChange={(e) => setTask(t.id, "title", e.target.value)} />
+                  <button style={S.iconBtnSm} onClick={() => delTask(t.id)}><Trash2 size={14} color="#616B7A" /></button>
+                </div>
+                <div style={S.taskEditDates}>
+                  <label style={S.taskDateField}>
+                    <span style={S.taskDateLabel}>いつやる</span>
+                    <input style={S.taskDate} type="date" value={t.start || ""}
+                      onChange={(e) => setTask(t.id, "start", e.target.value)} />
+                  </label>
+                  <label style={S.taskDateField}>
+                    <span style={S.taskDateLabel}>期限</span>
+                    <input style={S.taskDate} type="date" value={t.due || ""}
+                      onChange={(e) => setTask(t.id, "due", e.target.value)} />
+                  </label>
+                </div>
               </div>
             ))}
           </div>
@@ -2012,11 +2044,14 @@ const S = {
   diffBox: { background: "rgba(107,138,255,0.08)", border: "1px solid rgba(107,138,255,0.35)", borderRadius: 10, padding: 11, display: "flex", flexDirection: "column", gap: 9 },
   diffHead: { display: "flex", alignItems: "center", gap: 6 },
   diffTitle: { fontSize: 13.5, fontWeight: 700, color: C.ink },
-  diffApplyAll: { marginLeft: "auto", border: "none", background: "#6B8AFF", color: "#fff", borderRadius: 7, padding: "4px 11px", fontSize: 13.5, fontWeight: 700 },
+  diffApplyAll: { border: "none", background: "#6B8AFF", color: "#fff", borderRadius: 7, padding: "4px 11px", fontSize: 13.5, fontWeight: 700 },
+  diffDismissAll: { marginLeft: "auto", border: `1px solid ${C.line}`, background: "transparent", color: C.ink2, borderRadius: 7, padding: "4px 10px", fontSize: 13, fontWeight: 700 },
+  diffNewTag: { marginLeft: 6, fontSize: 10.5, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.15)", padding: "1px 6px", borderRadius: 6 },
+  diffDismiss: { marginLeft: "auto", border: "none", background: "transparent", color: C.ink3, borderRadius: 6, padding: "3px 8px", fontSize: 13, fontWeight: 700 },
   diffRow: { display: "flex", flexDirection: "column", gap: 4, background: C.panel2, borderRadius: 8, padding: "8px 10px" },
   diffRowTop: { display: "flex", alignItems: "center", gap: 8 },
   diffLabel: { fontSize: 13.5, fontWeight: 700, color: C.ink2 },
-  diffApply: { marginLeft: "auto", border: `1px solid ${C.line}`, background: C.panel, color: C.ink, borderRadius: 6, padding: "3px 11px", fontSize: 13.5, fontWeight: 700 },
+  diffApply: { border: "none", background: "#6B8AFF", color: "#fff", borderRadius: 6, padding: "3px 12px", fontSize: 13.5, fontWeight: 700 },
   diffVals: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
   diffCur: { fontSize: 13.5, color: C.ink3, textDecoration: "line-through" },
   diffNext: { fontSize: 13.5, color: "#6B8AFF", fontWeight: 700 },
@@ -2171,11 +2206,16 @@ const S = {
 
   taskBlockHead: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
   addTaskBtn: { display: "flex", alignItems: "center", gap: 4, border: `1px solid ${C.line}`, background: C.panel, borderRadius: 8, padding: "5px 9px", fontSize: 14, fontWeight: 700, color: C.ink2 },
-  taskEditList: { display: "flex", flexDirection: "column", gap: 7 },
-  taskEmpty: { fontSize: 14, color: C.ink3, padding: "4px 0" },
-  taskEditRow: { display: "flex", alignItems: "center", gap: 7 },
+  taskEditList: { display: "flex", flexDirection: "column", gap: 10 },
+  taskEmpty: { fontSize: 13.5, color: C.ink3, padding: "4px 2px" },
+  taskEditRow: { display: "flex", flexDirection: "column", gap: 7, padding: "10px 11px", background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 11 },
+  taskEditTop: { display: "flex", alignItems: "center", gap: 7 },
+  taskEditDates: { display: "flex", gap: 8, paddingLeft: 28 },
+  taskDateField: { flex: 1, display: "flex", flexDirection: "column", gap: 3 },
+  taskDateLabel: { fontSize: 11.5, fontWeight: 700, color: C.ink3 },
   taskInput: { flex: 1, minWidth: 0, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 9px", fontSize: 14.5 },
-  taskDate: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "6px 7px", fontSize: 14.5, color: C.ink2, width: 122 },
+  taskDate: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 8px", fontSize: 14, color: C.ink2, width: "100%" },
+  taskRowOld_removed: { display: "none" },
 
   iconBtn: { border: "none", background: "transparent", color: C.ink2, display: "flex", padding: 4 },
   iconBtnSm: { border: "none", background: "transparent", display: "flex", padding: 3 },
