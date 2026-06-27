@@ -608,22 +608,24 @@ function FocusView({ kpi, projects, allProjects, onOpen }) {
           const opened = openCard === c.key;
           return (
             <button key={c.key} onClick={() => setOpenCard(opened ? null : c.key)}
-              style={{ ...S.kpiCard, ...S.kpiCardBtn, ...(c.hot ? { boxShadow: `inset 0 0 0 1.5px ${c.color}33` } : {}), ...(opened ? { borderColor: c.color } : {}) }}>
+              style={{ ...S.kpiCard, ...S.kpiCardBtn,
+                ...(c.hot && !opened ? { boxShadow: `inset 0 0 0 1.5px ${c.color}33` } : {}),
+                ...(opened ? { borderColor: c.color, background: c.color + "1A", boxShadow: `0 0 0 2px ${c.color}` } : {}) }}>
               <div style={S.kpiTop}>
-                <span style={S.kpiLabel}>{c.label}</span>
+                <span style={{ ...S.kpiLabel, ...(opened ? { color: C.ink, fontWeight: 700 } : {}) }}>{c.label}</span>
                 <c.Icon size={17} color={c.color} strokeWidth={2.2} />
               </div>
               <div style={{ ...S.kpiValue, color: c.color, fontSize: c.wide ? 26 : 34 }}>
                 {c.value}<span style={S.kpiUnit}>{c.unit}</span>
               </div>
-              <span style={S.kpiHint}>{opened ? "閉じる" : "タップで一覧"}</span>
+              <span style={{ ...S.kpiHint, ...(opened ? { color: c.color, fontWeight: 700 } : {}) }}>{opened ? "▲ 閉じる" : "タップで一覧"}</span>
             </button>
           );
         })}
       </div>
 
       {openCard && (
-        <div style={{ ...S.replyPanel, borderColor: panelColor + "66" }}>
+        <div style={{ ...S.replyPanel, borderColor: panelColor }}>
           <div style={S.replyPanelHead}>
             <span style={{ ...S.replyPanelDot, background: panelColor }} />
             <span style={S.replyPanelTitle}>{titleOf[openCard]}</span>
@@ -2055,12 +2057,12 @@ const S = {
   diffVals: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
   diffCur: { fontSize: 14, color: C.ink3, textDecoration: "line-through" },
   diffNext: { fontSize: 14, color: "#6B8AFF", fontWeight: 700 },
-  replyPanel: { background: C.panel, border: "1px solid rgba(107,138,255,0.4)", borderRadius: 14, padding: 12, display: "flex", flexDirection: "column", gap: 8 },
-  replyPanelHead: { display: "flex", alignItems: "center", gap: 8, paddingBottom: 4 },
-  replyPanelDot: { width: 9, height: 9, borderRadius: "50%", flexShrink: 0 },
-  replyPanelNum: { fontFamily: F.disp, fontSize: 14, fontWeight: 700, color: C.ink3, marginLeft: "auto" },
+  replyPanel: { background: C.panel, border: `2px solid ${C.accent}`, borderRadius: 14, padding: 14, display: "flex", flexDirection: "column", gap: 9, marginTop: 12 },
+  replyPanelHead: { display: "flex", alignItems: "center", gap: 8, paddingBottom: 8, marginBottom: 2, borderBottom: `1px solid ${C.line}` },
+  replyPanelDot: { width: 10, height: 10, borderRadius: "50%", flexShrink: 0 },
+  replyPanelNum: { fontFamily: F.disp, fontSize: 14, fontWeight: 700, color: C.ink2, marginLeft: "auto" },
   replyItemDue: { fontSize: 14, fontWeight: 700, flexShrink: 0, marginLeft: 2 },
-  replyPanelTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 14.5, color: C.ink },
+  replyPanelTitle: { fontFamily: F.disp, fontWeight: 800, fontSize: 15.5, color: C.ink },
   replyPanelClose: { marginLeft: 4, border: "none", background: "transparent", color: C.ink3, display: "flex", padding: 2 },
   replyPanelEmpty: { fontSize: 14.5, color: C.ink3, padding: "6px 2px" },
   replyItem: { display: "flex", alignItems: "center", gap: 8, background: C.panel2, borderRadius: 10, padding: "9px 11px", minWidth: 0 },
@@ -2136,9 +2138,9 @@ const S = {
   resultCount: { marginLeft: "auto", fontSize: 14, color: C.ink3, fontWeight: 600, fontFamily: F.disp },
 
   /* card grid — PCでも1〜2列に抑える */
-  grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(400px, 100%), 1fr))", gap: 14, alignItems: "stretch" },
+  grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(400px, 100%), 1fr))", gap: 14, alignItems: "start" },
   card: {
-    position: "relative", textAlign: "left", overflow: "hidden", height: "100%",
+    position: "relative", textAlign: "left", overflow: "hidden",
     display: "flex", flexDirection: "column", gap: 0, padding: "16px 18px",
     background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, cursor: "pointer",
   },
@@ -2150,14 +2152,14 @@ const S = {
   statusDot: { display: "none" },
   cardCompany: { fontFamily: F.disp, fontWeight: 800, fontSize: 19, letterSpacing: 0.2, lineHeight: 1.3, marginBottom: 8 },
   cardWork: { display: "none" },
-  cardMetaLine: { display: "flex", alignItems: "baseline", gap: 10, marginBottom: 14 },
+  cardMetaLine: { display: "flex", alignItems: "baseline", gap: 10 },
   cardDeadlineSub: { fontSize: 14, color: C.ink2, fontWeight: 600 },
   cardDeadlineOver: { color: "#FF8A8A" },
   cardMetaRow: { display: "none" },
   cardReward: { fontFamily: F.disp, fontWeight: 800, fontSize: 16, fontVariantNumeric: "tabular-nums", letterSpacing: 0.3, color: C.ink2, marginLeft: "auto" },
   cardDue: { display: "flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
   cardDueNone: { display: "none" },
-  cardTaskList: { display: "flex", flexDirection: "column", gap: 10, paddingTop: 14, borderTop: `1px solid ${C.line}` },
+  cardTaskList: { display: "flex", flexDirection: "column", gap: 10, marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.line}` },
   cardTaskRow: { display: "flex", alignItems: "center", gap: 10 },
   cardTaskDot: { width: 7, height: 7, borderRadius: "50%", border: `1.5px solid ${C.ink3}`, flexShrink: 0 },
   cardTaskTitle: { flex: 1, minWidth: 0, fontSize: 14.5, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
