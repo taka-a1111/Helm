@@ -209,6 +209,18 @@ function dueMeta(dateStr) {
   return { n, color: "#9AA4B2", text: `あと${n}日`, urgent: false };
 }
 const yen = (v) => (v ? "¥" + v.toLocaleString("ja-JP") : "—");
+// 一覧用の日付ラベル：今日／N日前（期限切れ）／M月D日（曜）
+const WD_JP = ["日", "月", "火", "水", "木", "金", "土"];
+function dateLabelJP(dateStr) {
+  const n = daysUntil(dateStr);
+  if (n === null) return null;
+  if (n === 0) return { text: "今日", overdue: false };
+  if (n < 0) return { text: `${-n}日前`, overdue: true };
+  const parts = String(dateStr).split("-").map(Number);
+  if (parts.length < 3 || parts.some(isNaN)) return { text: `あと${n}日`, overdue: false };
+  const dt = new Date(parts[0], parts[1] - 1, parts[2]);
+  return { text: `${parts[1]}月${parts[2]}日（${WD_JP[dt.getDay()]}）`, overdue: false };
+}
 
 /* 旧データ（laneなし）にレーンを補完 */
 function laneFromDue(due) {
@@ -805,9 +817,9 @@ function ProjectsView({ projects, onOpen }) {
 }
 
 function ProjectCard({ p, onOpen }) {
-  const d = dueMeta(p.deadline);
   const replyN = replyTasksOf(p).length;
   const li = linkInfo(p.replyUrl);
+  const dl = p.deadline ? dateLabelJP(p.deadline) : null;
   const openTasks = p.tasks
     .filter((t) => !t.done && t.kind !== "reply")
     .sort((a, b) => {
@@ -816,7 +828,7 @@ function ProjectCard({ p, onOpen }) {
       if (an === null) return 1; if (bn === null) return -1;
       return an - bn;
     });
-  const showTasks = openTasks.slice(0, 3);
+  const showTasks = openTasks.slice(0, 4);
   const moreTasks = openTasks.length - showTasks.length;
   const total = p.tasks.filter((t) => t.kind !== "reply").length;
   const done = p.tasks.filter((t) => t.kind !== "reply" && t.done).length;
@@ -824,34 +836,27 @@ function ProjectCard({ p, onOpen }) {
     <button style={S.card} onClick={() => onOpen(p)}>
       <div style={S.cardHead}>
         <PlatformChip name={p.platform} small />
-        <span style={S.cardStatus}>{p.status}</span>
         {replyN > 0 && (
-          <span style={S.cardReplyPill}><Reply size={11} strokeWidth={2.4} />要返信{replyN}</span>
+          <span style={S.cardReplyPill}><Reply size={12} strokeWidth={2.4} />要返信{replyN}</span>
         )}
       </div>
 
       <div style={S.cardCompany}>{p.company}</div>
-      {p.work && <div style={S.cardWork}>{p.work}</div>}
+      {dl && (
+        <div style={{ ...S.cardDeadlineSub, ...(dl.overdue ? S.cardDeadlineOver : {}) }}>納期 {dl.text}</div>
+      )}
 
-      <div style={S.cardMetaRow}>
-        <span style={S.cardReward}>{yen(Number(p.reward))}</span>
-        {p.deadline
-          ? <span style={{ ...S.cardDue, color: d.color }}><CalendarDays size={12} strokeWidth={2.2} />{d.text}</span>
-          : <span style={S.cardDueNone}>期限未設定</span>}
-      </div>
+      <div style={S.cardReward}>{yen(Number(p.reward))}</div>
 
       {showTasks.length > 0 && (
         <div style={S.cardTaskList}>
           {showTasks.map((t) => {
-            const sd = t.start ? dueMeta(t.start) : null;
-            const td = t.due ? dueMeta(t.due) : null;
+            const lab = dateLabelJP(taskJudgeDate(t));
             return (
               <div key={t.id} style={S.cardTaskRow}>
                 <span style={S.cardTaskDot} />
                 <span style={S.cardTaskTitle}>{t.title || "（無題）"}</span>
-                {sd
-                  ? <span style={{ ...S.cardTaskDue, color: sd.color }}>▶{sd.text}</span>
-                  : td && <span style={{ ...S.cardTaskDue, color: td.color }}>{td.text}</span>}
+                {lab && <span style={lab.overdue ? S.cardTaskOver : S.cardTaskDate}>{lab.text}</span>}
               </div>
             );
           })}
@@ -865,13 +870,13 @@ function ProjectCard({ p, onOpen }) {
             <a href={p.replyUrl} target="_blank" rel="noopener noreferrer"
               style={{ ...S.openLinkCard, color: li.color, background: li.color + "22" }}
               onClick={(e) => e.stopPropagation()} title={li.label}>
-              <ExternalLink size={12} strokeWidth={2.4} />{li.short}
+              <ExternalLink size={13} strokeWidth={2.4} />{li.short}
             </a>
           )}
           <div style={{ flex: 1 }} />
           {total > 0 && (
             <span style={S.cardTasksCount}>
-              <CheckCircle2 size={13} strokeWidth={2.2} color={done === total ? "#51CF66" : "#616B7A"} />
+              <CheckCircle2 size={14} strokeWidth={2.2} color={done === total ? "#51CF66" : "#616B7A"} />
               {done}/{total}
             </span>
           )}
@@ -1530,6 +1535,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
           <Field label="期限">
             <input style={S.input} type="date" value={d.deadline}
               onKeyDown={enterClose}
+              onClick={(e) => { try { e.target.showPicker && e.target.showPicker(); } catch {} }}
               onChange={(e) => set("deadline", e.target.value)} />
           </Field>
 
@@ -1630,11 +1636,13 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
                   <label style={S.taskDateField}>
                     <span style={S.taskDateLabel}>いつやる</span>
                     <input style={S.taskDate} type="date" value={t.start || ""}
+                      onClick={(e) => { try { e.target.showPicker && e.target.showPicker(); } catch {} }}
                       onChange={(e) => setTask(t.id, "start", e.target.value)} />
                   </label>
                   <label style={S.taskDateField}>
                     <span style={S.taskDateLabel}>期限</span>
                     <input style={S.taskDate} type="date" value={t.due || ""}
+                      onClick={(e) => { try { e.target.showPicker && e.target.showPicker(); } catch {} }}
                       onChange={(e) => setTask(t.id, "due", e.target.value)} />
                   </label>
                 </div>
@@ -2008,7 +2016,7 @@ const S = {
     display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14,
   },
   brandTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 16, letterSpacing: 0.2, lineHeight: 1.1 },
-  brandSub: { fontSize: 13.5, color: C.ink3, marginTop: 2 },
+  brandSub: { fontSize: 14, color: C.ink3, marginTop: 2 },
 
   tabs: { display: "flex", gap: 4, background: C.panel2, padding: 4, borderRadius: 12, border: `1px solid ${C.line}` },
   tab: {
@@ -2040,55 +2048,55 @@ const S = {
   parseBox: { background: "rgba(107,138,255,0.08)", border: "1px solid rgba(107,138,255,0.3)", borderRadius: 12, padding: 13, display: "flex", flexDirection: "column", gap: 10 },
   parseBoxHead: { display: "flex", alignItems: "center", gap: 7 },
   parseBoxTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 14.5, color: C.ink },
-  parseHint: { fontSize: 13.5, color: C.ink2, lineHeight: 1.55 },
+  parseHint: { fontSize: 14, color: C.ink2, lineHeight: 1.55 },
   diffBox: { background: "rgba(107,138,255,0.08)", border: "1px solid rgba(107,138,255,0.35)", borderRadius: 10, padding: 11, display: "flex", flexDirection: "column", gap: 9 },
   diffHead: { display: "flex", alignItems: "center", gap: 6 },
-  diffTitle: { fontSize: 13.5, fontWeight: 700, color: C.ink },
-  diffApplyAll: { border: "none", background: "#6B8AFF", color: "#fff", borderRadius: 7, padding: "4px 11px", fontSize: 13.5, fontWeight: 700 },
-  diffDismissAll: { marginLeft: "auto", border: `1px solid ${C.line}`, background: "transparent", color: C.ink2, borderRadius: 7, padding: "4px 10px", fontSize: 13, fontWeight: 700 },
-  diffNewTag: { marginLeft: 6, fontSize: 10.5, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.15)", padding: "1px 6px", borderRadius: 6 },
-  diffDismiss: { marginLeft: "auto", border: "none", background: "transparent", color: C.ink3, borderRadius: 6, padding: "3px 8px", fontSize: 13, fontWeight: 700 },
+  diffTitle: { fontSize: 14, fontWeight: 700, color: C.ink },
+  diffApplyAll: { border: "none", background: "#6B8AFF", color: "#fff", borderRadius: 7, padding: "4px 11px", fontSize: 14, fontWeight: 700 },
+  diffDismissAll: { marginLeft: "auto", border: `1px solid ${C.line}`, background: "transparent", color: C.ink2, borderRadius: 7, padding: "4px 10px", fontSize: 13.5, fontWeight: 700 },
+  diffNewTag: { marginLeft: 6, fontSize: 12, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.15)", padding: "1px 6px", borderRadius: 6 },
+  diffDismiss: { marginLeft: "auto", border: "none", background: "transparent", color: C.ink3, borderRadius: 6, padding: "3px 8px", fontSize: 13.5, fontWeight: 700 },
   diffRow: { display: "flex", flexDirection: "column", gap: 4, background: C.panel2, borderRadius: 8, padding: "8px 10px" },
   diffRowTop: { display: "flex", alignItems: "center", gap: 8 },
-  diffLabel: { fontSize: 13.5, fontWeight: 700, color: C.ink2 },
-  diffApply: { border: "none", background: "#6B8AFF", color: "#fff", borderRadius: 6, padding: "3px 12px", fontSize: 13.5, fontWeight: 700 },
+  diffLabel: { fontSize: 14, fontWeight: 700, color: C.ink2 },
+  diffApply: { border: "none", background: "#6B8AFF", color: "#fff", borderRadius: 6, padding: "3px 12px", fontSize: 14, fontWeight: 700 },
   diffVals: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
-  diffCur: { fontSize: 13.5, color: C.ink3, textDecoration: "line-through" },
-  diffNext: { fontSize: 13.5, color: "#6B8AFF", fontWeight: 700 },
+  diffCur: { fontSize: 14, color: C.ink3, textDecoration: "line-through" },
+  diffNext: { fontSize: 14, color: "#6B8AFF", fontWeight: 700 },
   replyPanel: { background: C.panel, border: "1px solid rgba(107,138,255,0.4)", borderRadius: 14, padding: 12, display: "flex", flexDirection: "column", gap: 8 },
   replyPanelHead: { display: "flex", alignItems: "center", gap: 8, paddingBottom: 4 },
   replyPanelDot: { width: 9, height: 9, borderRadius: "50%", flexShrink: 0 },
-  replyPanelNum: { fontFamily: F.disp, fontSize: 13.5, fontWeight: 700, color: C.ink3, marginLeft: "auto" },
-  replyItemDue: { fontSize: 13.5, fontWeight: 700, flexShrink: 0, marginLeft: 2 },
+  replyPanelNum: { fontFamily: F.disp, fontSize: 14, fontWeight: 700, color: C.ink3, marginLeft: "auto" },
+  replyItemDue: { fontSize: 14, fontWeight: 700, flexShrink: 0, marginLeft: 2 },
   replyPanelTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 14.5, color: C.ink },
   replyPanelClose: { marginLeft: 4, border: "none", background: "transparent", color: C.ink3, display: "flex", padding: 2 },
   replyPanelEmpty: { fontSize: 14.5, color: C.ink3, padding: "6px 2px" },
   replyItem: { display: "flex", alignItems: "center", gap: 8, background: C.panel2, borderRadius: 10, padding: "9px 11px", minWidth: 0 },
   replyItemMain: { flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8, border: "none", background: "transparent", padding: 0, textAlign: "left", overflow: "hidden" },
   replyItemCol: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 },
-  replyItemSub: { fontSize: 13.5, color: C.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  replyItemSub: { fontSize: 14, color: C.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   replyItemMetaRow: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
   replyItemWrap: { display: "flex", flexDirection: "column", gap: 0 },
-  msgToggle: { display: "flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: C.ink3, fontSize: 13.5, fontWeight: 600, padding: "5px 2px 2px 4px", textAlign: "left" },
+  msgToggle: { display: "flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: C.ink3, fontSize: 14, fontWeight: 600, padding: "5px 2px 2px 4px", textAlign: "left" },
   msgQuote: { background: C.panel2, borderRadius: 10, padding: 12, marginTop: 4, display: "flex", flexDirection: "column", gap: 7, borderLeft: "3px solid rgba(107,138,255,0.5)" },
-  msgQuoteLabel: { fontSize: 12.5, fontWeight: 700, color: C.ink3 },
-  msgQuoteText: { fontSize: 13.5, color: C.ink, lineHeight: 1.7, whiteSpace: "pre-wrap" },
-  msgOpenProject: { alignSelf: "flex-start", border: "none", background: "transparent", color: "#6B8AFF", fontSize: 13.5, fontWeight: 700, padding: 0, marginTop: 2 },
-  replyItemReward: { fontFamily: F.disp, fontSize: 13.5, fontWeight: 700, color: C.ink2 },
-  replyItemDueSub: { fontSize: 13.5, fontWeight: 700, fontFamily: F.disp },
+  msgQuoteLabel: { fontSize: 13.5, fontWeight: 700, color: C.ink3 },
+  msgQuoteText: { fontSize: 14, color: C.ink, lineHeight: 1.7, whiteSpace: "pre-wrap" },
+  msgOpenProject: { alignSelf: "flex-start", border: "none", background: "transparent", color: "#6B8AFF", fontSize: 14, fontWeight: 700, padding: 0, marginTop: 2 },
+  replyItemReward: { fontFamily: F.disp, fontSize: 14, fontWeight: 700, color: C.ink2 },
+  replyItemDueSub: { fontSize: 14, fontWeight: 700, fontFamily: F.disp },
   dueTaskList: { display: "flex", flexDirection: "column", gap: 4, marginTop: 5 },
   dueTaskRow: { display: "flex", alignItems: "center", gap: 8 },
-  dueTaskName: { flex: 1, minWidth: 0, fontSize: 13.5, color: C.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  dueTaskDays: { fontSize: 13.5, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap", flexShrink: 0 },
+  dueTaskName: { flex: 1, minWidth: 0, fontSize: 14, color: C.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  dueTaskDays: { fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap", flexShrink: 0 },
   replyItemName: { fontWeight: 700, fontSize: 14, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  replyItemLink: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13.5, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.16)", padding: "6px 11px", borderRadius: 8, textDecoration: "none", flexShrink: 0, whiteSpace: "nowrap" },
+  replyItemLink: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.16)", padding: "6px 11px", borderRadius: 8, textDecoration: "none", flexShrink: 0, whiteSpace: "nowrap" },
 
   kpiRow: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(158px, 1fr))", gap: 12 },
   kpiCard: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "16px 17px", textAlign: "left", width: "100%" },
   kpiCardBtn: { cursor: "pointer" },
-  kpiHint: { display: "block", marginTop: 6, fontSize: 12.5, color: C.ink3, fontWeight: 600 },
+  kpiHint: { display: "block", marginTop: 6, fontSize: 13.5, color: C.ink3, fontWeight: 600 },
   kpiTop: { display: "flex", alignItems: "center", justifyContent: "space-between" },
-  kpiLabel: { fontSize: 13.5, color: C.ink2, fontWeight: 600 },
+  kpiLabel: { fontSize: 14, color: C.ink2, fontWeight: 600 },
   kpiValue: { fontFamily: F.disp, fontWeight: 700, marginTop: 8, lineHeight: 1, fontVariantNumeric: "tabular-nums" },
   kpiUnit: { fontSize: 14, marginLeft: 3, fontWeight: 500 },
 
@@ -2114,13 +2122,13 @@ const S = {
   prowCompanyBig: { fontFamily: F.disp, fontWeight: 800, fontSize: 16.5, letterSpacing: 0.2, color: C.ink, lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" },
   prowTop: { display: "flex", alignItems: "center", gap: 7, marginBottom: 3 },
   prowCompany: { fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  prowWork: { fontSize: 13.5, color: C.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 3 },
+  prowWork: { fontSize: 14, color: C.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 3 },
   prowRight: { display: "flex", alignItems: "center", gap: 9, flexShrink: 0 },
-  dueText: { fontSize: 13.5, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
-  taskCount: { display: "flex", alignItems: "center", gap: 3, fontSize: 13.5, color: C.ink3, fontWeight: 600 },
+  dueText: { fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
+  taskCount: { display: "flex", alignItems: "center", gap: 3, fontSize: 14, color: C.ink3, fontWeight: 600 },
 
   openLinkMeta: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, color: "#6B8AFF", background: "rgba(107,138,255,0.16)", textDecoration: "none", flexShrink: 0 },
-  replyPill: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 13.5, fontWeight: 700, padding: "2px 7px", borderRadius: 7 },
+  replyPill: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 14, fontWeight: 700, padding: "2px 7px", borderRadius: 7 },
 
   /* filter */
   filterBar: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
@@ -2133,37 +2141,40 @@ const S = {
     borderRadius: 9, padding: "7px 11px", fontSize: 14.5, color: C.ink2, fontWeight: 600,
   },
   replyFilterOn: { background: "rgba(107,138,255,0.15)", borderColor: "#3A4663", color: "#6B8AFF" },
-  resultCount: { marginLeft: "auto", fontSize: 13.5, color: C.ink3, fontWeight: 600, fontFamily: F.disp },
+  resultCount: { marginLeft: "auto", fontSize: 14, color: C.ink3, fontWeight: 600, fontFamily: F.disp },
 
-  /* card grid */
-  grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 13, alignItems: "stretch" },
+  /* card grid — PCでも1〜2列に抑える */
+  grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(400px, 1fr))", gap: 14, alignItems: "stretch" },
   card: {
     position: "relative", textAlign: "left", overflow: "hidden", height: "100%",
-    display: "flex", flexDirection: "column", gap: 0, padding: "15px 16px",
+    display: "flex", flexDirection: "column", gap: 0, padding: "16px 18px",
     background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, cursor: "pointer",
   },
   cardBar: { display: "none" },
   cardInner: { flex: 1, display: "flex", flexDirection: "column" },
-  cardHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10 },
-  cardStatus: { fontSize: 13.5, fontWeight: 700, color: C.ink3, marginLeft: 2 },
-  cardReplyPill: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 12.5, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.15)", padding: "2px 8px", borderRadius: 7, marginLeft: "auto" },
-  statusDot: { fontSize: 13.5, fontWeight: 700 },
-  cardCompany: { fontFamily: F.disp, fontWeight: 800, fontSize: 17, letterSpacing: 0.2, lineHeight: 1.3, marginBottom: 3 },
-  cardWork: { fontSize: 13.5, color: C.ink2, lineHeight: 1.5, marginBottom: 13,
-    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" },
-  cardMetaRow: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, paddingTop: 12, borderTop: `1px solid ${C.line}` },
-  cardReward: { fontFamily: F.disp, fontWeight: 800, fontSize: 19, fontVariantNumeric: "tabular-nums", letterSpacing: 0.3 },
-  cardDue: { display: "flex", alignItems: "center", gap: 4, fontSize: 13.5, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
-  cardDueNone: { fontSize: 13.5, color: C.ink3, fontWeight: 600, whiteSpace: "nowrap" },
-  cardTaskList: { display: "flex", flexDirection: "column", gap: 7, marginTop: 13 },
-  cardTaskRow: { display: "flex", alignItems: "center", gap: 8 },
-  cardTaskDot: { width: 6, height: 6, borderRadius: "50%", border: `1.5px solid ${C.ink3}`, flexShrink: 0 },
-  cardTaskTitle: { flex: 1, minWidth: 0, fontSize: 13.5, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  cardTaskDue: { fontSize: 13.5, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap", flexShrink: 0 },
-  cardTaskMore: { fontSize: 13.5, color: C.ink3, fontWeight: 600, paddingLeft: 14 },
-  cardFoot: { display: "flex", alignItems: "center", gap: 8, paddingTop: 12, marginTop: 13, borderTop: `1px solid ${C.line}` },
-  cardTasksCount: { display: "flex", alignItems: "center", gap: 4, fontSize: 13.5, color: C.ink3, fontWeight: 700, fontFamily: F.disp },
-  cardTasks: { display: "flex", alignItems: "center", gap: 4, fontSize: 13.5, color: C.ink3, fontWeight: 600, marginLeft: "auto", fontFamily: F.disp },
+  cardHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 9 },
+  cardStatus: { display: "none" },
+  cardReplyPill: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 13.5, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.15)", padding: "3px 9px", borderRadius: 7, marginLeft: "auto" },
+  statusDot: { display: "none" },
+  cardCompany: { fontFamily: F.disp, fontWeight: 800, fontSize: 19, letterSpacing: 0.2, lineHeight: 1.3, marginBottom: 4 },
+  cardWork: { display: "none" },
+  cardDeadlineSub: { fontSize: 14, color: C.ink2, fontWeight: 600, marginBottom: 10 },
+  cardDeadlineOver: { color: "#FF8A8A" },
+  cardMetaRow: { display: "none" },
+  cardReward: { fontFamily: F.disp, fontWeight: 800, fontSize: 22, fontVariantNumeric: "tabular-nums", letterSpacing: 0.3, marginBottom: 14 },
+  cardDue: { display: "flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
+  cardDueNone: { display: "none" },
+  cardTaskList: { display: "flex", flexDirection: "column", gap: 10, paddingTop: 14, borderTop: `1px solid ${C.line}` },
+  cardTaskRow: { display: "flex", alignItems: "center", gap: 10 },
+  cardTaskDot: { width: 7, height: 7, borderRadius: "50%", border: `1.5px solid ${C.ink3}`, flexShrink: 0 },
+  cardTaskTitle: { flex: 1, minWidth: 0, fontSize: 14.5, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  cardTaskDate: { fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap", flexShrink: 0, color: C.ink2 },
+  cardTaskOver: { fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap", flexShrink: 0, color: "#FF8A8A", background: "rgba(255,107,107,0.13)", padding: "2px 9px", borderRadius: 7 },
+  cardTaskDue: { fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap", flexShrink: 0 },
+  cardTaskMore: { fontSize: 14, color: C.ink3, fontWeight: 600, paddingLeft: 17 },
+  cardFoot: { display: "flex", alignItems: "center", gap: 8, paddingTop: 13, marginTop: 14, borderTop: `1px solid ${C.line}` },
+  cardTasksCount: { display: "flex", alignItems: "center", gap: 4, fontSize: 14, color: C.ink3, fontWeight: 700, fontFamily: F.disp },
+  cardTasks: { display: "flex", alignItems: "center", gap: 4, fontSize: 14, color: C.ink3, fontWeight: 600, marginLeft: "auto", fontFamily: F.disp },
 
   /* tasks view */
   trow: { display: "flex", alignItems: "center", gap: 12, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: "11px 14px" },
@@ -2184,18 +2195,18 @@ const S = {
   drawerHead: { position: "relative", display: "flex", alignItems: "center", gap: 10, padding: "16px 18px", borderBottom: `1px solid ${C.line}`, background: C.panel },
   drawerGrip: { position: "absolute", top: 6, left: "50%", transform: "translateX(-50%)", width: 36, height: 4, borderRadius: 3, background: C.line },
   drawerTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 15, marginRight: "auto" },
-  autoSaveTag: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13.5, fontWeight: 700, color: "#51CF66", transition: "opacity 0.3s" },
+  autoSaveTag: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, color: "#51CF66", transition: "opacity 0.3s" },
   focusTaskBox: { background: "rgba(107,138,255,0.10)", border: `1px solid rgba(107,138,255,0.35)`, borderRadius: 12, padding: 13, marginBottom: 14, display: "flex", flexDirection: "column", gap: 9 },
   focusTaskHead: { display: "flex", alignItems: "center", gap: 6 },
-  focusTaskLabel: { fontSize: 13.5, fontWeight: 700, color: C.accent },
+  focusTaskLabel: { fontSize: 14, fontWeight: 700, color: C.accent },
   focusTaskTitle: { fontSize: 14.5, fontWeight: 700, color: C.ink, lineHeight: 1.4 },
   focusTaskQuick: { display: "flex", flexWrap: "wrap", gap: 6 },
-  focusQuickBtn: { border: `1px solid ${C.line}`, background: C.panel, color: C.ink2, borderRadius: 8, padding: "7px 12px", fontSize: 13.5, fontWeight: 700 },
+  focusQuickBtn: { border: `1px solid ${C.line}`, background: C.panel, color: C.ink2, borderRadius: 8, padding: "7px 12px", fontSize: 14, fontWeight: 700 },
   focusQuickBtnOn: { background: C.accent, borderColor: C.accent, color: "#fff" },
   focusDateRow: { display: "flex", alignItems: "center", gap: 8 },
-  focusDateLabel: { fontSize: 13.5, color: C.ink2, fontWeight: 600, flexShrink: 0 },
-  focusDateInput: { flex: 1, minWidth: 0, border: `1px solid ${C.line}`, background: C.panel2, color: C.ink, borderRadius: 8, padding: "7px 9px", fontSize: 13.5 },
-  focusTaskNote: { fontSize: 13.5, color: C.ink3 },
+  focusDateLabel: { fontSize: 14, color: C.ink2, fontWeight: 600, flexShrink: 0 },
+  focusDateInput: { flex: 1, minWidth: 0, border: `1px solid ${C.line}`, background: C.panel2, color: C.ink, borderRadius: 8, padding: "7px 9px", fontSize: 14 },
+  focusTaskNote: { fontSize: 14, color: C.ink3 },
   drawerBody: { flex: 1, overflowY: "auto", overscrollBehavior: "contain", padding: 18, display: "flex", flexDirection: "column", gap: 14 },
   drawerFoot: { display: "flex", alignItems: "center", gap: 8, padding: "13px 18px", borderTop: `1px solid ${C.line}`, background: C.panel },
 
@@ -2207,12 +2218,12 @@ const S = {
   taskBlockHead: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
   addTaskBtn: { display: "flex", alignItems: "center", gap: 4, border: `1px solid ${C.line}`, background: C.panel, borderRadius: 8, padding: "5px 9px", fontSize: 14, fontWeight: 700, color: C.ink2 },
   taskEditList: { display: "flex", flexDirection: "column", gap: 10 },
-  taskEmpty: { fontSize: 13.5, color: C.ink3, padding: "4px 2px" },
+  taskEmpty: { fontSize: 14, color: C.ink3, padding: "4px 2px" },
   taskEditRow: { display: "flex", flexDirection: "column", gap: 7, padding: "10px 11px", background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 11 },
   taskEditTop: { display: "flex", alignItems: "center", gap: 7 },
   taskEditDates: { display: "flex", gap: 8, paddingLeft: 28 },
   taskDateField: { flex: 1, display: "flex", flexDirection: "column", gap: 3 },
-  taskDateLabel: { fontSize: 11.5, fontWeight: 700, color: C.ink3 },
+  taskDateLabel: { fontSize: 13, fontWeight: 700, color: C.ink3 },
   taskInput: { flex: 1, minWidth: 0, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 9px", fontSize: 14.5 },
   taskDate: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 8px", fontSize: 14, color: C.ink2, width: "100%" },
   taskRowOld_removed: { display: "none" },
@@ -2243,16 +2254,16 @@ const S = {
   replyResult: { display: "flex", flexDirection: "column", gap: 8 },
   histWrap: { display: "flex", flexDirection: "column", gap: 6, marginTop: 4 },
   histHead: { display: "flex", alignItems: "center", gap: 7 },
-  histTitle: { fontSize: 13.5, fontWeight: 700, color: C.ink2 },
-  histCount: { fontFamily: F.disp, fontSize: 13.5, fontWeight: 700, color: C.ink3 },
+  histTitle: { fontSize: 14, fontWeight: 700, color: C.ink2 },
+  histCount: { fontFamily: F.disp, fontSize: 14, fontWeight: 700, color: C.ink3 },
   histItem: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden" },
   histRow: { display: "flex", alignItems: "center", gap: 7, width: "100%", textAlign: "left", border: "none", background: "transparent", padding: "10px 11px" },
-  histDate: { fontFamily: F.disp, fontSize: 13.5, fontWeight: 700, color: C.ink2, flexShrink: 0 },
-  histPreview: { fontSize: 13.5, color: C.ink3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, minWidth: 0 },
+  histDate: { fontFamily: F.disp, fontSize: 14, fontWeight: 700, color: C.ink2, flexShrink: 0 },
+  histPreview: { fontSize: 14, color: C.ink3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, minWidth: 0 },
   histBody: { display: "flex", flexDirection: "column", gap: 10, padding: "4px 12px 12px", borderTop: `1px solid ${C.line}` },
   histBlock: { display: "flex", flexDirection: "column", gap: 4 },
-  histLabel: { fontSize: 13.5, fontWeight: 700, color: C.ink3 },
-  histText: { fontSize: 13.5, color: C.ink, lineHeight: 1.65, whiteSpace: "pre-wrap", background: C.panel2, borderRadius: 8, padding: "9px 11px" },
+  histLabel: { fontSize: 14, fontWeight: 700, color: C.ink3 },
+  histText: { fontSize: 14, color: C.ink, lineHeight: 1.65, whiteSpace: "pre-wrap", background: C.panel2, borderRadius: 8, padding: "9px 11px" },
   replyResultHead: { display: "flex", alignItems: "center", justifyContent: "space-between" },
   copyBtn: { display: "flex", alignItems: "center", gap: 4, border: `1px solid ${C.line}`, background: C.panel, borderRadius: 7, padding: "5px 9px", fontSize: 14.5, fontWeight: 700, color: C.ink2 },
   repliedBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: "1px solid #2E5E3F", background: "rgba(81,207,102,0.15)", color: "#51CF66", borderRadius: 9, padding: "9px 14px", fontSize: 14.5, fontWeight: 700 },
@@ -2261,7 +2272,7 @@ const S = {
   openDestBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: "1px solid #3D4660", background: "rgba(107,138,255,0.16)", color: "#6B8AFF", borderRadius: 9, padding: "9px 14px", fontSize: 14.5, fontWeight: 700, textDecoration: "none" },
 
   /* kanban */
-  kanbanHint: { fontSize: 13.5, color: C.ink3, fontWeight: 500 },
+  kanbanHint: { fontSize: 14, color: C.ink3, fontWeight: 500 },
 
   /* task tabs (Googleタスク風) */
   taskTabs: { display: "flex", gap: 7, overflowX: "auto", marginBottom: 14, paddingBottom: 2 },
@@ -2269,7 +2280,7 @@ const S = {
   taskTabOn: { background: C.accent, borderColor: C.accent, color: "#fff" },
   taskTabOver: { borderColor: C.accent, background: "rgba(107,138,255,0.18)" },
   taskTabDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
-  taskTabCount: { fontFamily: F.disp, fontSize: 13.5, fontWeight: 800, padding: "1px 7px", borderRadius: 20, background: "#161A20", color: C.ink2, minWidth: 18, textAlign: "center" },
+  taskTabCount: { fontFamily: F.disp, fontSize: 14, fontWeight: 800, padding: "1px 7px", borderRadius: 20, background: "#161A20", color: C.ink2, minWidth: 18, textAlign: "center" },
   taskTabCountOn: { background: "rgba(255,255,255,0.25)", color: "#fff" },
   taskTabBar: { position: "absolute", left: 10, right: 10, bottom: -1.5, height: 2.5, borderRadius: 2 },
 
@@ -2282,7 +2293,7 @@ const S = {
   laneHead: { display: "flex", alignItems: "center", gap: 7 },
   laneDot: { width: 9, height: 9, borderRadius: "50%", flexShrink: 0 },
   laneTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 14, color: C.ink },
-  laneCount: { fontFamily: F.disp, fontWeight: 700, fontSize: 13.5, padding: "1px 7px", borderRadius: 20, minWidth: 20, textAlign: "center" },
+  laneCount: { fontFamily: F.disp, fontWeight: 700, fontSize: 14, padding: "1px 7px", borderRadius: 20, minWidth: 20, textAlign: "center" },
   laneAdd: { marginLeft: "auto", border: "none", background: "transparent", color: C.ink3, display: "flex", padding: 3, borderRadius: 6 },
   laneList: { display: "flex", flexDirection: "column", gap: 8 },
   laneEmpty: { border: "1.5px dashed #333B46", borderRadius: 10, padding: "14px 8px", textAlign: "center", fontSize: 14.5, color: C.ink3, fontWeight: 500 },
@@ -2293,16 +2304,16 @@ const S = {
   tcardMeta: { display: "flex", alignItems: "center", gap: 7, marginTop: 6, flexWrap: "wrap" },
   tcardProject: { display: "flex", alignItems: "center", gap: 5, border: "none", background: "transparent", padding: 0, fontSize: 14, color: C.ink2, fontWeight: 600, minWidth: 0 },
   tcardCompany: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 110 },
-  dueMini: { fontSize: 13.5, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
+  dueMini: { fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
 
   moveWrap: { position: "relative", flexShrink: 0 },
   dueWrap: { position: "relative", flexShrink: 0 },
-  dueChip: { display: "flex", alignItems: "center", gap: 4, border: "1px solid", background: "transparent", borderRadius: 8, padding: "5px 9px", fontSize: 13.5, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
+  dueChip: { display: "flex", alignItems: "center", gap: 4, border: "1px solid", background: "transparent", borderRadius: 8, padding: "5px 9px", fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
   duePop: { position: "absolute", top: 30, right: 0, zIndex: 31, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.35)", padding: 6, display: "flex", flexDirection: "column", gap: 2, minWidth: 150 },
-  dueItem: { border: "none", background: "transparent", borderRadius: 7, padding: "8px 10px", fontSize: 13.5, fontWeight: 600, color: C.ink, textAlign: "left" },
+  dueItem: { border: "none", background: "transparent", borderRadius: 7, padding: "8px 10px", fontSize: 14, fontWeight: 600, color: C.ink, textAlign: "left" },
   dueDateRow: { display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderTop: `1px solid ${C.line}`, marginTop: 2 },
-  dueDateLabel: { fontSize: 13.5, color: C.ink3, fontWeight: 600, flexShrink: 0 },
-  dueDateInput: { flex: 1, minWidth: 0, border: `1px solid ${C.line}`, background: C.panel2, color: C.ink, borderRadius: 7, padding: "5px 7px", fontSize: 13.5 },
+  dueDateLabel: { fontSize: 14, color: C.ink3, fontWeight: 600, flexShrink: 0 },
+  dueDateInput: { flex: 1, minWidth: 0, border: `1px solid ${C.line}`, background: C.panel2, color: C.ink, borderRadius: 7, padding: "5px 7px", fontSize: 14 },
   moveBtn: { border: "none", background: "transparent", padding: 2, display: "flex", cursor: "grab", touchAction: "none" },
   tcardDragging: { opacity: 0.4 },
   swipeArea: { minHeight: "55vh" },
@@ -2313,8 +2324,8 @@ const S = {
 
   /* assist buttons */
   assistBtnRow: { display: "flex", gap: 8 },
-  assistNote: { fontSize: 13.5, color: C.ink3, lineHeight: 1.5 },
-  summaryBtn: { marginTop: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", border: `1px solid ${C.line}`, background: C.panel, color: C.ink2, borderRadius: 9, padding: "9px 12px", fontSize: 13.5, fontWeight: 700 },
+  assistNote: { fontSize: 14, color: C.ink3, lineHeight: 1.5 },
+  summaryBtn: { marginTop: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", border: `1px solid ${C.line}`, background: C.panel, color: C.ink2, borderRadius: 9, padding: "9px 12px", fontSize: 14, fontWeight: 700 },
   extractBtn: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, borderRadius: 9, padding: "10px 12px", fontSize: 14.5, fontWeight: 700 },
   spinnerDark: { width: 13, height: 13, border: "2px solid rgba(24,27,34,0.25)", borderTopColor: C.ink, borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" },
   extractMsg: { fontSize: 14, color: "#51CF66", background: "rgba(81,207,102,0.15)", border: "1px solid #2E5E3F", borderRadius: 8, padding: "8px 10px" },
@@ -2329,11 +2340,11 @@ const S = {
   syncToggleRow: { display: "flex", alignItems: "center", gap: 9, padding: "4px 0", cursor: "pointer" },
   syncCheck: { width: 20, height: 20, borderRadius: 6, border: `1.5px solid ${C.line}`, background: C.panel2, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   syncCheckOn: { background: C.accent, borderColor: C.accent },
-  syncToggleLabel: { fontSize: 13.5, color: C.ink, fontWeight: 600 },
+  syncToggleLabel: { fontSize: 14, color: C.ink, fontWeight: 600 },
   syncBtnRow: { display: "flex", gap: 8, marginTop: 8 },
-  syncSubBtn: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, borderRadius: 9, padding: "9px 10px", fontSize: 13.5, fontWeight: 700 },
-  syncStatus: { fontSize: 13.5, fontWeight: 700, marginTop: 8 },
-  resetBtn: { border: `1px solid ${C.line}`, background: C.panel2, color: C.ink2, borderRadius: 9, padding: "10px 14px", fontSize: 13.5, fontWeight: 700 },
+  syncSubBtn: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, borderRadius: 9, padding: "9px 10px", fontSize: 14, fontWeight: 700 },
+  syncStatus: { fontSize: 14, fontWeight: 700, marginTop: 8 },
+  resetBtn: { border: `1px solid ${C.line}`, background: C.panel2, color: C.ink2, borderRadius: 9, padding: "10px 14px", fontSize: 14, fontWeight: 700 },
   resetBtnConfirm: { border: "1px solid rgba(255,107,107,0.5)", background: "rgba(255,107,107,0.13)", color: "#FF6B6B" },
 
   /* task group */
@@ -2341,7 +2352,7 @@ const S = {
   taskGroupHead: { display: "flex", alignItems: "center", gap: 9, border: "none", background: "transparent", padding: "4px 2px 10px", width: "100%", textAlign: "left", borderBottom: `1px solid ${C.line}`, marginBottom: 10 },
   taskGroupBar: { width: 4, height: 18, borderRadius: 3, flexShrink: 0 },
   taskGroupName: { fontFamily: F.disp, fontWeight: 800, fontSize: 17, letterSpacing: 0.2, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  taskGroupCount: { fontFamily: F.disp, fontSize: 13.5, fontWeight: 800, color: "#fff", background: C.accent, borderRadius: 20, padding: "2px 9px", minWidth: 22, textAlign: "center", marginLeft: "auto", flexShrink: 0 },
+  taskGroupCount: { fontFamily: F.disp, fontSize: 14, fontWeight: 800, color: "#fff", background: C.accent, borderRadius: 20, padding: "2px 9px", minWidth: 22, textAlign: "center", marginLeft: "auto", flexShrink: 0 },
 
   /* calendar */
   calBar: { display: "flex", alignItems: "center", gap: 10 },
@@ -2349,7 +2360,7 @@ const S = {
   calTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 17, minWidth: 130, textAlign: "center" },
   calToday: { marginLeft: "auto", border: `1px solid ${C.line}`, background: C.panel, borderRadius: 9, padding: "7px 14px", fontSize: 14.5, fontWeight: 700, color: C.ink },
   calGrid: { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, background: C.line, border: `1px solid ${C.line}`, borderRadius: 14, padding: 4, overflow: "hidden" },
-  calWd: { fontSize: 13.5, fontWeight: 700, textAlign: "center", padding: "5px 0" },
+  calWd: { fontSize: 14, fontWeight: 700, textAlign: "center", padding: "5px 0" },
   calCell: { background: C.panel, border: "1.5px solid transparent", borderRadius: 9, minHeight: 50, padding: "5px 2px 6px", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, cursor: "pointer" },
   calCellEmpty: { background: C.panel2, borderRadius: 9, minHeight: 50, opacity: 0.4 },
   calCellSel: { borderColor: C.accent, background: "rgba(107,138,255,0.1)" },
@@ -2361,12 +2372,12 @@ const S = {
   calDetail: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, display: "flex", flexDirection: "column", gap: 8 },
   calDetailHead: { display: "flex", alignItems: "center", gap: 8, paddingBottom: 4 },
   calDetailDate: { fontFamily: F.disp, fontWeight: 700, fontSize: 15, color: C.ink },
-  calDetailCount: { marginLeft: "auto", fontFamily: F.disp, fontSize: 13.5, fontWeight: 700, color: C.ink3 },
+  calDetailCount: { marginLeft: "auto", fontFamily: F.disp, fontSize: 14, fontWeight: 700, color: C.ink3 },
   calDetailEmpty: { fontSize: 14.5, color: C.ink3, padding: "10px 2px" },
   calDetailItem: { display: "flex", alignItems: "center", gap: 10, background: C.panel2, border: "none", borderRadius: 10, padding: "11px 12px", textAlign: "left", width: "100%" },
   calDetailBar: { width: 4, alignSelf: "stretch", borderRadius: 3, flexShrink: 0 },
   calDetailLabel: { flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  calDetailKind: { fontSize: 13.5, fontWeight: 700, flexShrink: 0 },
+  calDetailKind: { fontSize: 14, fontWeight: 700, flexShrink: 0 },
   movePopScrim: { position: "fixed", inset: 0, zIndex: 30 },
   movePop: { position: "absolute", top: 24, right: 0, zIndex: 31, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(20,24,40,0.16)", padding: 5, display: "flex", flexDirection: "column", gap: 2, minWidth: 130 },
   moveItem: { display: "flex", alignItems: "center", gap: 7, border: "none", background: "transparent", borderRadius: 7, padding: "7px 9px", fontSize: 14, fontWeight: 600, color: C.ink, textAlign: "left", whiteSpace: "nowrap" },
