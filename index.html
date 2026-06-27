@@ -476,6 +476,26 @@ export default function App() {
     persist(projects.map((p) => p.id !== pid ? p : {
       ...p, tasks: p.tasks.map((t) => t.id === tid ? { ...t, ...patch } : t),
     }));
+  // 並び替え：ドラッグ中は表示のみ更新（保存しない）、離した時に保存
+  const reorderVisual = (dragId, overId) => {
+    if (dragId === overId) return;
+    setProjects((prev) => {
+      const from = prev.findIndex((p) => p.id === dragId);
+      const to = prev.findIndex((p) => p.id === overId);
+      if (from < 0 || to < 0) return prev;
+      const arr = [...prev];
+      const [m] = arr.splice(from, 1);
+      arr.splice(to, 0, m);
+      return arr;
+    });
+  };
+  const commitOrder = () => {
+    setProjects((prev) => {
+      try { window.storage.set(STORE_KEY, JSON.stringify(prev)); } catch {}
+      pushCloud(prev);
+      return prev;
+    });
+  };
 
   /* ---- derived ---- */
   const active = useMemo(() => projects.filter((p) => p.status !== "完了" && p.id !== INBOX_ID), [projects]);
@@ -532,7 +552,7 @@ export default function App() {
         <div style={S.viewDots}>
           {VIEWS.map((v) => <span key={v} style={{ ...S.viewDot, ...(view === v ? S.viewDotOn : {}) }} />)}
         </div>
-        {view === "focus" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={setEditing} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} />}
+        {view === "focus" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={setEditing} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} />}
         {view === "tasks" && <TasksView projects={projects} onToggle={toggleTask} onOpen={setEditing} onOpenTask={openProjectTask} onChangeLane={changeLane} onChangeDue={changeDue} onAddTask={addTaskToLane} />}
         {view === "calendar" && <CalendarView projects={projects} onOpen={setEditing} />}
       </main>
@@ -561,12 +581,39 @@ export default function App() {
 /* ============================================================
    フォーカス（ダッシュボード）
    ============================================================ */
-function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask }) {
+function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit }) {
   const [openCard, setOpenCard] = useState(null);
   const [openMsg, setOpenMsg] = useState(null);
   const [fPlat, setFPlat] = useState("すべて");
   const [fReply, setFReply] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  const [dragId, setDragId] = useState(null);
+
+  const startDrag = (e, pid) => {
+    e.stopPropagation();
+    try { e.currentTarget.setPointerCapture && e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+    setDragId(pid);
+    const move = (ev) => {
+      if (ev.cancelable) ev.preventDefault();
+      const x = ev.clientX, y = ev.clientY;
+      const el = document.elementFromPoint(x, y);
+      const card = el && el.closest && el.closest("[data-pid]");
+      if (card) {
+        const overId = card.getAttribute("data-pid");
+        if (overId && overId !== pid) onReorder && onReorder(pid, overId);
+      }
+    };
+    const up = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", up);
+      setDragId(null);
+      onReorderCommit && onReorderCommit();
+    };
+    document.addEventListener("pointermove", move, { passive: false });
+    document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", up);
+  };
 
   // 返信タスク（案件ごと複数あり得る）
   const replyEntries = projects.flatMap((p) => replyTasksOf(p).map((t) => ({ p, t })));
@@ -575,16 +622,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
   const base = (showDone ? (allProjects || projects).filter((p) => p.id !== INBOX_ID) : projects);
   const cardList = base
     .filter((p) => fPlat === "すべて" || p.platform === fPlat)
-    .filter((p) => !fReply || replyTasksOf(p).length > 0)
-    .sort((a, b) => {
-      const ar = replyTasksOf(a).length > 0 ? 0 : 1;
-      const br = replyTasksOf(b).length > 0 ? 0 : 1;
-      if (ar !== br) return ar - br;
-      const an = daysUntil(a.deadline), bn = daysUntil(b.deadline);
-      if (an === null && bn === null) return 0;
-      if (an === null) return 1; if (bn === null) return -1;
-      return an - bn;
-    });
+    .filter((p) => !fReply || replyTasksOf(p).length > 0);
   const doneCount = (allProjects || projects).filter((p) => p.id !== INBOX_ID && p.status === "完了").length;
 
   const minDue = (p) => { const a = dueDaysList(p); return a.length ? Math.min(...a) : Infinity; };
@@ -723,7 +761,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
       )}
 
       <section>
-        <SectionHead icon={<Clock size={15} />} title="案件" sub="返信と締切が近い順" />
+        <SectionHead icon={<Clock size={15} />} title="案件" sub="ドラッグで並び替え" />
         <div style={S.focusFilterBar}>
           <FilterSelect value={fPlat} onChange={setFPlat} options={["すべて", ...Object.keys(PLATFORMS)]} />
           <button onClick={() => setFReply((v) => !v)}
@@ -740,7 +778,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
         </div>
         {cardList.length === 0 && <Empty text="条件に合う案件がありません。" />}
         <div style={S.grid}>
-          {cardList.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onAddTask={onAddTask} onUpdateTask={onUpdateTask} />)}
+          {cardList.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onAddTask={onAddTask} onUpdateTask={onUpdateTask} onDragHandle={startDrag} dragging={dragId === p.id} dragActive={dragId !== null} />)}
         </div>
       </section>
     </div>
@@ -827,7 +865,7 @@ function ProjectsView({ projects, onOpen }) {
   );
 }
 
-function ProjectCard({ p, onOpen, onSetDeadline, onAddTask, onUpdateTask }) {
+function ProjectCard({ p, onOpen, onSetDeadline, onAddTask, onUpdateTask, onDragHandle, dragging, dragActive }) {
   const replyN = replyTasksOf(p).length;
   const li = linkInfo(p.replyUrl);
   const dl = p.deadline ? dateLabelJP(p.deadline) : null;
@@ -856,11 +894,21 @@ function ProjectCard({ p, onOpen, onSetDeadline, onAddTask, onUpdateTask }) {
   const openPickerInput = (e) => { e.stopPropagation(); try { e.currentTarget.showPicker && e.currentTarget.showPicker(); } catch {} };
   const submitTask = () => { const t = newTitle.trim(); if (t) { onAddTask && onAddTask(p.id, "later", t); setNewTitle(""); } };
   const upd = (tid, patch) => onUpdateTask && onUpdateTask(p.id, tid, patch);
+  const draggable = !!onDragHandle;
   return (
-    <div style={S.card} role="button" tabIndex={0} onClick={() => { if (editId) setEditId(null); else onOpen(p); }}>
-      {replyN > 0 && (
+    <div data-pid={p.id}
+      style={{ ...S.card, ...(dragging ? S.cardDragging : {}), ...(dragActive && !dragging ? S.cardDragOther : {}) }}
+      role="button" tabIndex={0} onClick={() => { if (editId) setEditId(null); else onOpen(p); }}>
+      {(draggable || replyN > 0) && (
         <div style={S.cardHead}>
-          <span style={S.cardReplyPill}><Reply size={12} strokeWidth={2.4} />要返信{replyN}</span>
+          {draggable && (
+            <span style={S.cardGrip} onClick={stop} onPointerDown={(e) => onDragHandle(e, p.id)} title="ドラッグで並び替え">
+              <GripVertical size={17} strokeWidth={2} />
+            </span>
+          )}
+          {replyN > 0 && (
+            <span style={S.cardReplyPill}><Reply size={12} strokeWidth={2.4} />要返信{replyN}</span>
+          )}
         </div>
       )}
 
@@ -2216,7 +2264,10 @@ const S = {
   },
   cardBar: { display: "none" },
   cardInner: { flex: 1, display: "flex", flexDirection: "column" },
-  cardHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 9 },
+  cardHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 9, minHeight: 20 },
+  cardGrip: { display: "inline-flex", alignItems: "center", justifyContent: "center", color: C.ink3, cursor: "grab", touchAction: "none", marginLeft: -4, marginRight: "auto", padding: "2px 2px" },
+  cardDragging: { opacity: 0.85, boxShadow: `0 0 0 2px ${C.accent}, 0 10px 24px rgba(0,0,0,0.45)`, cursor: "grabbing" },
+  cardDragOther: { transition: "transform 0.12s ease" },
   cardStatus: { display: "none" },
   cardReplyPill: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 13.5, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.15)", padding: "3px 9px", borderRadius: 7, marginLeft: "auto" },
   statusDot: { display: "none" },
