@@ -116,8 +116,8 @@ function makeSample() {
     {
       id: uid(), company: "香典返しe-shop", platform: "クラウドワークス",
       work: "自社ECサイトの商品ページのデザイン更新", reward: "",
-      status: "進行中", reply: "要返信", deadline: "",
-      note: "契約条件の金額変更に同意済み（2026/6/26）。商品ページ改修＋トップ改装の相談あり。",
+      status: "進行中", reply: "なし", deadline: "",
+      note: "契約金額の変更に同意済み（2026/6/26）。クラウドワークスで受信メッセージあり（内容未確認）。",
       summary: "", received: "", replyDraft: "", repliedAt: null,
       replyUrl: "https://crowdworks.jp/messages/415229956",
       replyHistory: [], tasks: [], createdAt: Date.now(),
@@ -125,8 +125,8 @@ function makeSample() {
     {
       id: uid(), company: "サイエンスウェブ（SWT）", platform: "クラウドワークス",
       work: "", reward: "",
-      status: "進行中", reply: "要返信", deadline: "",
-      note: "クラウドワークスで複数メッセージのやり取りあり。",
+      status: "進行中", reply: "なし", deadline: "",
+      note: "クラウドワークスで受信メッセージあり（複数・内容未確認）。",
       summary: "", received: "", replyDraft: "", repliedAt: null,
       replyUrl: "https://crowdworks.jp/messages/415264795",
       replyHistory: [], tasks: [], createdAt: Date.now(),
@@ -134,8 +134,8 @@ function makeSample() {
     {
       id: uid(), company: "株式会社クオーレ", platform: "クラウドワークス",
       work: "", reward: "",
-      status: "進行中", reply: "要返信", deadline: "",
-      note: "クラウドワークスでメッセージ受信（2026/6/26）。",
+      status: "進行中", reply: "なし", deadline: "",
+      note: "クラウドワークスで受信メッセージあり（2026/6/26・内容未確認）。",
       summary: "", received: "", replyDraft: "", repliedAt: null,
       replyUrl: "https://crowdworks.jp/messages/415271484",
       replyHistory: [], tasks: [], createdAt: Date.now(),
@@ -789,8 +789,9 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onChangeLane, onCha
           <div key={g.project.id} style={S.taskGroup}>
             <button style={S.taskGroupHead}
               onClick={() => { if (g.project.id !== INBOX_ID) onOpen(g.project); }}>
-              <PlatformChip name={g.project.platform} small />
+              <span style={{ ...S.taskGroupBar, background: PLATFORMS[g.project.platform] || C.accent }} />
               <span style={S.taskGroupName}>{g.project.company}</span>
+              <PlatformChip name={g.project.platform} small />
               <span style={S.taskGroupCount}>{g.tasks.filter((t) => !t.done).length}</span>
             </button>
             <div style={S.list}>
@@ -1936,10 +1937,11 @@ const S = {
   resetBtnConfirm: { border: "1px solid rgba(255,107,107,0.5)", background: "rgba(255,107,107,0.13)", color: "#FF6B6B" },
 
   /* task group */
-  taskGroup: { marginBottom: 16 },
-  taskGroupHead: { display: "flex", alignItems: "center", gap: 8, border: "none", background: "transparent", padding: "2px 2px 9px", width: "100%", textAlign: "left" },
-  taskGroupName: { fontFamily: F.disp, fontWeight: 700, fontSize: 14.5, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  taskGroupCount: { fontFamily: F.disp, fontSize: 11.5, fontWeight: 700, color: C.ink3, background: "#2A323D", borderRadius: 20, padding: "1px 8px", minWidth: 20, textAlign: "center" },
+  taskGroup: { marginBottom: 18 },
+  taskGroupHead: { display: "flex", alignItems: "center", gap: 9, border: "none", background: "transparent", padding: "4px 2px 10px", width: "100%", textAlign: "left", borderBottom: `1px solid ${C.line}`, marginBottom: 10 },
+  taskGroupBar: { width: 4, height: 18, borderRadius: 3, flexShrink: 0 },
+  taskGroupName: { fontFamily: F.disp, fontWeight: 800, fontSize: 17, letterSpacing: 0.2, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  taskGroupCount: { fontFamily: F.disp, fontSize: 12, fontWeight: 800, color: "#fff", background: C.accent, borderRadius: 20, padding: "2px 9px", minWidth: 22, textAlign: "center", marginLeft: "auto", flexShrink: 0 },
 
   /* calendar */
   calBar: { display: "flex", alignItems: "center", gap: 10 },
