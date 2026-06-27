@@ -109,176 +109,36 @@ const reply = (title, msg = "") => ({ id: uid(), title, done: false, due: dStr(0
 const task = (title, offset, lane = "today", done = false) => ({ id: uid(), title, done, due: offset == null ? "" : dStr(offset), lane, kind: "task" });
 
 function makeSample() {
+  // 本番初期データ。Gmail（クラウドワークス通知）から確認できた進行中案件のみ骨組みで登録。
+  // 金額・期限・経緯・届いたメッセージは未入力。案件を開いて追記してください。
+  // 直接契約（Chatwork）の案件はGmailから取得できないため、手動で追加してください。
   return [
     {
-      id: uid(), company: "香典返しe-shop", platform: "直契約",
-      work: "ShopServe トップページ改装・商品ページ改修", reward: 33000,
-      status: "進行中", reply: "要返信", deadline: dStr(4),
-      note: "Chatworkでやり取り。トップ改装の見積り交渉中。",
-      summary: "依頼：ShopServeのトップページ改装＋商品ページ改修。商品ページ改修は着手済み。トップ改装は提案済みで、先方が社内検討中。未決：改装の最終見積り金額と対応期間。",
-      received: "お世話になっております。先日ご提案いただいたトップページ改装の件、社内で前向きに検討しております。改めてお見積りと、対応にかかる期間の目安を教えていただけますでしょうか。あわせて、商品ページの修正分は今週中に反映可能でしょうか。",
-      replyDraft: "", repliedAt: null,
-      replyUrl: "https://www.chatwork.com/",
-      tasks: [
-        reply("見積りと対応期間を返信", "お世話になっております。先日ご提案いただいたトップページ改装の件、社内で前向きに検討しております。改めてお見積りと、対応にかかる期間の目安を教えていただけますでしょうか。あわせて、商品ページの修正分は今週中に反映可能でしょうか。"),
-        task("トップページ改装の構成案を作成", 3, "today"),
-        task("商品ページのデザイン修正", null, "later", true),
-      ],
-      createdAt: Date.now(),
+      id: uid(), company: "香典返しe-shop", platform: "クラウドワークス",
+      work: "自社ECサイトの商品ページのデザイン更新", reward: "",
+      status: "進行中", reply: "要返信", deadline: "",
+      note: "契約条件の金額変更に同意済み（2026/6/26）。商品ページ改修＋トップ改装の相談あり。",
+      summary: "", received: "", replyDraft: "", repliedAt: null,
+      replyUrl: "https://crowdworks.jp/messages/415229956",
+      replyHistory: [], tasks: [], createdAt: Date.now(),
     },
     {
-      id: uid(), company: "NPO法人 Salon de Kid's ネット", platform: "クラウドワークス",
-      work: "WordPressサイトリニューアル", reward: 35000,
-      status: "進行中", reply: "要返信", deadline: dStr(4),
-      note: "クラウドワークス経由。メッセージで2件の確認待ち。",
-      summary: "NPOサイトのWordPressリニューアル。支給素材は反映済み。掲載写真の利用許諾と公開予定日が未確定で、先方の回答待ち。",
-      received: "（別トーク）公開予定日についても、候補日をいくつかご提示いただけますでしょうか。",
-      replyDraft: "", repliedAt: null,
-      replyUrl: "https://crowdworks.jp/mypage/messages",
-      tasks: [
-        reply("画像の利用許諾の可否を返信", "サイトに掲載する子どもの写真について、保護者の許諾はこちらで取得すべきでしょうか。掲載範囲とあわせてご確認いただけますと幸いです。"),
-        reply("公開予定日の候補を返信", "（別トーク）公開予定日についても、候補日をいくつかご提示いただけますでしょうか。"),
-        task("クライアント支給素材の反映", null, "later", true),
-        task("WordPress本番環境へ移行", 4, "today"),
-      ],
-      createdAt: Date.now(),
+      id: uid(), company: "サイエンスウェブ（SWT）", platform: "クラウドワークス",
+      work: "", reward: "",
+      status: "進行中", reply: "要返信", deadline: "",
+      note: "クラウドワークスで複数メッセージのやり取りあり。",
+      summary: "", received: "", replyDraft: "", repliedAt: null,
+      replyUrl: "https://crowdworks.jp/messages/415264795",
+      replyHistory: [], tasks: [], createdAt: Date.now(),
     },
     {
-      id: uid(), company: "HARUTAS / Kitchen.Work", platform: "直契約",
-      work: "住宅ECブログ執筆（note・楽天、週2〜3本）", reward: 0,
-      status: "進行中", reply: "要返信", deadline: dStr(2),
-      note: "継続案件。1通のメッセージで2用件 → 返信は1件にまとめる。",
-      summary: "継続のブログ執筆案件（note・楽天、週2〜3本）。テーマは先方と都度すり合わせ。これまで住宅系の記事を継続納品。トーンは読みやすい実用記事。",
-      received: "２点ご連絡です。①次回のnote記事のテーマは「狭小住宅の収納術」で進めていただけますか。②前回の楽天記事、見出しを2つ追加でご対応お願いできますか。お手すきにご返信ください。",
-      replyDraft: "", repliedAt: null,
-      replyUrl: "https://www.chatwork.com/",
-      tasks: [
-        reply("テーマ確認と記事修正の件に返信", "２点ご連絡です。①次回のnote記事のテーマは「狭小住宅の収納術」で進めていただけますか。②前回の楽天記事、見出しを2つ追加でご対応お願いできますか。お手すきにご返信ください。"),
-        task("note記事を2本執筆", 2, "today"),
-        task("楽天ブログ記事を1本執筆", 5, "later"),
-      ],
-      createdAt: Date.now(),
-    },
-    {
-      id: uid(), company: "水上工芸", platform: "直契約",
-      work: "コーポレートサイト（Next.js / Vercel）", reward: 120000,
-      status: "納品待ち", reply: "なし", deadline: dStr(1),
-      note: "mizukamikougei.com。Vercelで運用。",
-      received: "", replyDraft: "", repliedAt: null, replyUrl: "",
-      tasks: [
-        task("最終デプロイ確認", 1, "today"),
-        task("納品後の入金確認", null, "payment"),
-      ],
-      createdAt: Date.now(),
-    },
-    {
-      id: uid(), company: "サイエンスウェブ（SWT）", platform: "直契約",
-      work: "LP制作（PhotoIUPAC 2028 ほか）", reward: 0,
-      status: "進行中", reply: "要返信", deadline: dStr(6),
-      note: "別トークで2件の問い合わせ（配色の相談・別件の見積り依頼）→ 返信は2件。",
-      summary: "PhotoIUPAC 2028のLP制作が主案件。初稿提出済みで配色を調整中。別途、日本超特価部品のデモサイトで追加ページの相談が来ている。",
-      received: "（別件のご相談です）日本超特価部品のデモサイトについて、別ページの追加分のお見積りをお願いできますでしょうか。",
-      replyDraft: "", repliedAt: null,
-      replyUrl: "https://www.chatwork.com/",
-      tasks: [
-        reply("配色の相談に返信", "LP初稿を拝見しました。ファーストビューの配色について何点かご相談したく、ご返信いただけますと幸いです。"),
-        reply("追加デモの見積り依頼に返信", "（別トーク）日本超特価部品のデモサイトについて、別ページの追加分のお見積りをお願いできますでしょうか。"),
-        task("PhotoIUPAC 2028 LPのデザイン調整", 3, "today"),
-        task("日本超特価部品デモの修正", 6, "later"),
-      ],
-      createdAt: Date.now(),
-    },
-    {
-      id: uid(), company: "株式会社KRO", platform: "クラウドワークス",
-      work: "FXアフィリエイト記事の執筆", reward: 18000,
-      status: "進行中", reply: "なし", deadline: dStr(3),
-      note: "クラウドワークス経由。",
-      received: "", replyDraft: "", repliedAt: null,
-      replyUrl: "https://crowdworks.jp/mypage/messages",
-      tasks: [
-        task("FX記事の構成を作成", 1, "today"),
-        task("FX記事の本文を執筆", 3, "later"),
-      ],
-      createdAt: Date.now(),
-    },
-    {
-      id: uid(), company: "GeNieee（南るな様）", platform: "直契約",
-      work: "Chatworkリマインダーツール（テスト案件）", reward: 0,
-      status: "進行中", reply: "要返信", deadline: dStr(2),
-      note: "GAS開発。Chatworkで2件のやり取り。",
-      summary: "Chatworkリマインダーツールのテスト案件。GASで試作を提供しテスト中。検知タイミングと文面テンプレートが論点。",
-      received: "（別トーク）リマインダーの文面テンプレートについてもご相談したく、ご返信ください。",
-      replyDraft: "", repliedAt: null,
-      replyUrl: "https://www.chatwork.com/",
-      tasks: [
-        reply("テスト結果の所感を返信", "テスト版をお試しいただきありがとうございます。検知のタイミングについて1点ご確認させてください。ご都合よいときにご返信ください。"),
-        reply("文面テンプレートの相談に返信", "（別トーク）リマインダーの文面テンプレートについてもご相談したく、ご返信ください。"),
-        task("GASリマインダーの動作テスト", 2, "today"),
-      ],
-      createdAt: Date.now(),
-    },
-    {
-      id: uid(), company: "Chatwork監視ツール（自社開発）", platform: "その他",
-      work: "GAS + Claude API 返信ドラフト自動生成", reward: 0,
-      status: "進行中", reply: "なし", deadline: "",
-      note: "Claudeで開発中。全ルーム巡回 → 返信案をスプレッドシート出力。",
-      received: "", replyDraft: "", repliedAt: null, replyUrl: "",
-      tasks: [
-        task("全ルーム巡回ロジックの実装", 1, "today"),
-        task("返信ドラフト生成の精度調整", 4, "later"),
-      ],
-      createdAt: Date.now(),
-    },
-    {
-      id: uid(), company: "Helm（このアプリ）", platform: "その他",
-      work: "案件・タスク・返信を一元管理", reward: 0,
-      status: "進行中", reply: "なし", deadline: "",
-      note: "Claudeで開発中。Vercelに公開予定。",
-      received: "", replyDraft: "", repliedAt: null, replyUrl: "",
-      tasks: [
-        task("返信タスクのカレンダー表示を確認", 0, "today"),
-        task("Vercelへデプロイ", 2, "later"),
-      ],
-      createdAt: Date.now(),
-    },
-    {
-      id: uid(), company: "@afimana7（X収益化）", platform: "その他",
-      work: "ChatGPT×アフィリエイト発信・収益化", reward: 0,
-      status: "進行中", reply: "なし", deadline: "",
-      note: "3本柱戦略で月10万円が目標。",
-      received: "", replyDraft: "", repliedAt: null, replyUrl: "",
-      tasks: [
-        task("X投稿を3本作成", 1, "today"),
-        task("note商品のLPを改善", 6, "later"),
-      ],
-      createdAt: Date.now(),
-    },
-    {
-      id: uid(), company: "ベストバイ本舗（メルカリShops）", platform: "その他",
-      work: "女性アクセサリー（AliExpress仕入れ）", reward: 0,
-      status: "進行中", reply: "なし", deadline: "",
-      note: "Googleタスクで在庫・仕入れ管理。",
-      received: "", replyDraft: "", repliedAt: null, replyUrl: "",
-      tasks: [
-        task("AliExpressから新商品を仕入れ", 3, "later"),
-        task("商品ページを5点作成", 5, "later"),
-      ],
-      createdAt: Date.now(),
-    },
-    {
-      id: uid(), company: "コスモスの里", platform: "直契約",
-      work: "介護施設サイト制作（WordPress）", reward: 0,
-      status: "完了", reply: "なし", deadline: "",
-      note: "福山市。4月に納品・検収完了。",
-      received: "", replyDraft: "", repliedAt: null, replyUrl: "",
-      tasks: [], createdAt: Date.now(),
-    },
-    {
-      id: uid(), company: "naotosatoh.jp", platform: "直契約",
-      work: "EC停止 + STORES移行", reward: 0,
-      status: "完了", reply: "なし", deadline: "",
-      note: "5月に移行完了。", received: "", replyDraft: "", repliedAt: null, replyUrl: "",
-      tasks: [], createdAt: Date.now(),
+      id: uid(), company: "株式会社クオーレ", platform: "クラウドワークス",
+      work: "", reward: "",
+      status: "進行中", reply: "要返信", deadline: "",
+      note: "クラウドワークスでメッセージ受信（2026/6/26）。",
+      summary: "", received: "", replyDraft: "", repliedAt: null,
+      replyUrl: "https://crowdworks.jp/messages/415271484",
+      replyHistory: [], tasks: [], createdAt: Date.now(),
     },
   ];
 }
@@ -358,6 +218,8 @@ export default function App() {
     }
   };
   const [editing, setEditing] = useState(null); // draft object or null
+  const [focusTaskId, setFocusTaskId] = useState(null); // タスクから開いたとき、上部に表示するタスクID
+  const openProjectTask = (project, taskId) => { setFocusTaskId(taskId || null); setEditing(project); };
   const [confirmDel, setConfirmDel] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -464,7 +326,7 @@ export default function App() {
         </div>
         {view === "focus" && <FocusView kpi={kpi} projects={active} onOpen={setEditing} />}
         {view === "projects" && <ProjectsView projects={projects} onOpen={setEditing} />}
-        {view === "tasks" && <TasksView projects={projects} onToggle={toggleTask} onOpen={setEditing} onChangeLane={changeLane} onChangeDue={changeDue} onAddTask={addTaskToLane} />}
+        {view === "tasks" && <TasksView projects={projects} onToggle={toggleTask} onOpen={setEditing} onOpenTask={openProjectTask} onChangeLane={changeLane} onChangeDue={changeDue} onAddTask={addTaskToLane} />}
         {view === "calendar" && <CalendarView projects={projects} onOpen={setEditing} />}
       </main>
 
@@ -474,7 +336,8 @@ export default function App() {
       {editing && (
         <Drawer
           draft={editing}
-          onClose={() => setEditing(null)}
+          focusTaskId={focusTaskId}
+          onClose={() => { setEditing(null); setFocusTaskId(null); }}
           onSave={saveProject}
           onDelete={(id) => setConfirmDel(id)}
           confirmDel={confirmDel}
@@ -767,7 +630,7 @@ function ProjectCard({ p, onOpen }) {
 /* ============================================================
    タスクビュー（横タブ・横スワイプ切替・ポインタD&D）
    ============================================================ */
-function TasksView({ projects, onToggle, onOpen, onChangeLane, onChangeDue, onAddTask }) {
+function TasksView({ projects, onToggle, onOpen, onOpenTask, onChangeLane, onChangeDue, onAddTask }) {
   const [activeLane, setActiveLane] = useState("today");
   const [overTab, setOverTab] = useState(null);
   const [moveId, setMoveId] = useState(null);
@@ -933,7 +796,7 @@ function TasksView({ projects, onToggle, onOpen, onChangeLane, onChangeDue, onAd
             <div style={S.list}>
               {g.tasks.map((t) => (
                 <TaskCard key={t.id} t={t} lane={activeLane}
-                  onToggle={onToggle} onOpen={onOpen}
+                  onToggle={onToggle} onOpen={onOpen} onOpenTask={onOpenTask}
                   dragging={dragTid === t.id}
                   moveOpen={moveId === t.id}
                   onHandlePointerDown={onHandlePointerDown}
@@ -952,7 +815,7 @@ function TasksView({ projects, onToggle, onOpen, onChangeLane, onChangeDue, onAd
   );
 }
 
-function TaskCard({ t, lane, onToggle, onOpen, dragging, moveOpen, onHandlePointerDown, onMove, onChangeDue }) {
+function TaskCard({ t, lane, onToggle, onOpen, onOpenTask, dragging, moveOpen, onHandlePointerDown, onMove, onChangeDue }) {
   const d = dueMeta(t.due);
   const [dueOpen, setDueOpen] = useState(false);
   const dStrLocal = (off) => { const x = new Date(); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() + off); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
@@ -970,7 +833,7 @@ function TaskCard({ t, lane, onToggle, onOpen, dragging, moveOpen, onHandlePoint
                 : <Circle size={18} color="#3A434F" strokeWidth={2.2} />}
       </button>
       <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }}
-        onClick={() => { if (t.project.id !== INBOX_ID) onOpen(t.project); }}>
+        onClick={() => { if (t.project.id !== INBOX_ID) (onOpenTask ? onOpenTask(t.project, t.id) : onOpen(t.project)); }}>
         <div style={{ ...S.tcardTitle, ...(t.done ? S.trowDone : {}) }}>
           {t.kind === "reply" && <Reply size={13} color="#FF922B" strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-1px" }} />}
           {t.title || "（無題）"}
@@ -1054,7 +917,7 @@ function AddTaskInline({ projects, onAdd, onCancel }) {
 /* ============================================================
    詳細・編集ドロワー
    ============================================================ */
-function Drawer({ draft, onClose, onSave, onDelete, confirmDel, onConfirmDelete, onCancelDelete }) {
+function Drawer({ draft, focusTaskId, onClose, onSave, onDelete, confirmDel, onConfirmDelete, onCancelDelete }) {
   const [d, setD] = useState(draft);
   const [generating, setGenerating] = useState(false);
   const [extracting, setExtracting] = useState(false);
@@ -1067,6 +930,8 @@ function Drawer({ draft, onClose, onSave, onDelete, confirmDel, onConfirmDelete,
   const [copied, setCopied] = useState(false);
   const isNew = !draft.company && draft.tasks.length === 0;
   const set = (k, v) => setD((p) => ({ ...p, [k]: v }));
+  const focusTask = focusTaskId ? d.tasks.find((t) => t.id === focusTaskId) : null;
+  const dStrLocalD = (off) => { const x = new Date(); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() + off); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
 
   async function parseProject() {
     if (!pasteText.trim()) { setParseMsg("案件情報を貼り付けてください。"); return; }
@@ -1256,6 +1121,34 @@ function Drawer({ draft, onClose, onSave, onDelete, confirmDel, onConfirmDelete,
         </div>
 
         <div style={S.drawerBody}>
+          {focusTask && (
+            <div style={S.focusTaskBox}>
+              <div style={S.focusTaskHead}>
+                <ListChecks size={14} color={C.accent} strokeWidth={2.4} />
+                <span style={S.focusTaskLabel}>選んだタスクの期日変更</span>
+              </div>
+              <div style={S.focusTaskTitle}>
+                {focusTask.kind === "reply" && <Reply size={13} color="#FF922B" strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-1px" }} />}
+                {focusTask.title || "（無題）"}
+              </div>
+              <div style={S.focusTaskQuick}>
+                {[["今日", dStrLocalD(0)], ["明日", dStrLocalD(1)], ["3日後", dStrLocalD(3)], ["1週間後", dStrLocalD(7)], ["なし", ""]].map(([label, val]) => {
+                  const on = (focusTask.due || "") === val;
+                  return (
+                    <button key={label} style={{ ...S.focusQuickBtn, ...(on ? S.focusQuickBtnOn : {}) }}
+                      onClick={() => setTask(focusTask.id, "due", val)}>{label}</button>
+                  );
+                })}
+              </div>
+              <label style={S.focusDateRow}>
+                <span style={S.focusDateLabel}>日付で指定</span>
+                <input type="date" style={S.focusDateInput} value={focusTask.due || ""}
+                  onChange={(e) => setTask(focusTask.id, "due", e.target.value)} />
+              </label>
+              <div style={S.focusTaskNote}>変更は下のタスク一覧と連動します。保存で確定します。</div>
+            </div>
+          )}
+
           <div style={S.parseBox}>
             <div style={S.parseBoxHead}>
               <Sparkles size={14} color={C.accent} strokeWidth={2.3} />
@@ -1905,6 +1798,17 @@ const S = {
   },
   drawerHead: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 18px", borderBottom: `1px solid ${C.line}`, background: C.panel },
   drawerTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 15 },
+  focusTaskBox: { background: "rgba(107,138,255,0.10)", border: `1px solid rgba(107,138,255,0.35)`, borderRadius: 12, padding: 13, marginBottom: 14, display: "flex", flexDirection: "column", gap: 9 },
+  focusTaskHead: { display: "flex", alignItems: "center", gap: 6 },
+  focusTaskLabel: { fontSize: 12, fontWeight: 700, color: C.accent },
+  focusTaskTitle: { fontSize: 14.5, fontWeight: 700, color: C.ink, lineHeight: 1.4 },
+  focusTaskQuick: { display: "flex", flexWrap: "wrap", gap: 6 },
+  focusQuickBtn: { border: `1px solid ${C.line}`, background: C.panel, color: C.ink2, borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 700 },
+  focusQuickBtnOn: { background: C.accent, borderColor: C.accent, color: "#fff" },
+  focusDateRow: { display: "flex", alignItems: "center", gap: 8 },
+  focusDateLabel: { fontSize: 12.5, color: C.ink2, fontWeight: 600, flexShrink: 0 },
+  focusDateInput: { flex: 1, minWidth: 0, border: `1px solid ${C.line}`, background: C.panel2, color: C.ink, borderRadius: 8, padding: "7px 9px", fontSize: 13.5 },
+  focusTaskNote: { fontSize: 11.5, color: C.ink3 },
   drawerBody: { flex: 1, overflowY: "auto", padding: 18, display: "flex", flexDirection: "column", gap: 14 },
   drawerFoot: { display: "flex", alignItems: "center", gap: 8, padding: "13px 18px", borderTop: `1px solid ${C.line}`, background: C.panel },
 
