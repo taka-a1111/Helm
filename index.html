@@ -834,19 +834,20 @@ function ProjectCard({ p, onOpen }) {
   const done = p.tasks.filter((t) => t.kind !== "reply" && t.done).length;
   return (
     <button style={S.card} onClick={() => onOpen(p)}>
-      <div style={S.cardHead}>
-        <PlatformChip name={p.platform} small />
-        {replyN > 0 && (
+      {replyN > 0 && (
+        <div style={S.cardHead}>
           <span style={S.cardReplyPill}><Reply size={12} strokeWidth={2.4} />要返信{replyN}</span>
-        )}
-      </div>
-
-      <div style={S.cardCompany}>{p.company}</div>
-      {dl && (
-        <div style={{ ...S.cardDeadlineSub, ...(dl.overdue ? S.cardDeadlineOver : {}) }}>納期 {dl.text}</div>
+        </div>
       )}
 
-      <div style={S.cardReward}>{yen(Number(p.reward))}</div>
+      <div style={S.cardCompany}>{p.company}</div>
+
+      <div style={S.cardMetaLine}>
+        {dl && (
+          <span style={{ ...S.cardDeadlineSub, ...(dl.overdue ? S.cardDeadlineOver : {}) }}>納期 {dl.text}</span>
+        )}
+        <span style={S.cardReward}>{yen(Number(p.reward))}</span>
+      </div>
 
       {showTasks.length > 0 && (
         <div style={S.cardTaskList}>
@@ -864,22 +865,13 @@ function ProjectCard({ p, onOpen }) {
         </div>
       )}
 
-      {(li || total > 0) && (
+      {li && (
         <div style={S.cardFoot}>
-          {li && (
-            <a href={p.replyUrl} target="_blank" rel="noopener noreferrer"
-              style={{ ...S.openLinkCard, color: li.color, background: li.color + "22" }}
-              onClick={(e) => e.stopPropagation()} title={li.label}>
-              <ExternalLink size={13} strokeWidth={2.4} />{li.short}
-            </a>
-          )}
-          <div style={{ flex: 1 }} />
-          {total > 0 && (
-            <span style={S.cardTasksCount}>
-              <CheckCircle2 size={14} strokeWidth={2.2} color={done === total ? "#51CF66" : "#616B7A"} />
-              {done}/{total}
-            </span>
-          )}
+          <a href={p.replyUrl} target="_blank" rel="noopener noreferrer"
+            style={{ ...S.openLinkCard, color: li.color, background: li.color + "22" }}
+            onClick={(e) => e.stopPropagation()} title={li.label}>
+            <ExternalLink size={13} strokeWidth={2.4} />{li.short}
+          </a>
         </div>
       )}
     </button>
@@ -2156,12 +2148,13 @@ const S = {
   cardStatus: { display: "none" },
   cardReplyPill: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 13.5, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.15)", padding: "3px 9px", borderRadius: 7, marginLeft: "auto" },
   statusDot: { display: "none" },
-  cardCompany: { fontFamily: F.disp, fontWeight: 800, fontSize: 19, letterSpacing: 0.2, lineHeight: 1.3, marginBottom: 4 },
+  cardCompany: { fontFamily: F.disp, fontWeight: 800, fontSize: 19, letterSpacing: 0.2, lineHeight: 1.3, marginBottom: 8 },
   cardWork: { display: "none" },
-  cardDeadlineSub: { fontSize: 14, color: C.ink2, fontWeight: 600, marginBottom: 10 },
+  cardMetaLine: { display: "flex", alignItems: "baseline", gap: 10, marginBottom: 14 },
+  cardDeadlineSub: { fontSize: 14, color: C.ink2, fontWeight: 600 },
   cardDeadlineOver: { color: "#FF8A8A" },
   cardMetaRow: { display: "none" },
-  cardReward: { fontFamily: F.disp, fontWeight: 800, fontSize: 22, fontVariantNumeric: "tabular-nums", letterSpacing: 0.3, marginBottom: 14 },
+  cardReward: { fontFamily: F.disp, fontWeight: 800, fontSize: 16, fontVariantNumeric: "tabular-nums", letterSpacing: 0.3, color: C.ink2, marginLeft: "auto" },
   cardDue: { display: "flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
   cardDueNone: { display: "none" },
   cardTaskList: { display: "flex", flexDirection: "column", gap: 10, paddingTop: 14, borderTop: `1px solid ${C.line}` },
