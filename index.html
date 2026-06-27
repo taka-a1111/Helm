@@ -106,7 +106,7 @@ function makeSample() {
       note: "Chatworkでやり取り。トップ改装の見積り交渉中。",
       received: "お世話になっております。先日ご提案いただいたトップページ改装の件、社内で前向きに検討しております。改めてお見積りと、対応にかかる期間の目安を教えていただけますでしょうか。あわせて、商品ページの修正分は今週中に反映可能でしょうか。",
       replyDraft: "", repliedAt: null,
-      replyUrl: "https://www.chatwork.com/#!rid000000000",
+      replyUrl: "https://www.chatwork.com/",
       tasks: [
         reply("見積りと対応期間を返信"),
         task("トップページ改装の構成案を作成", 3, "today"),
@@ -117,13 +117,15 @@ function makeSample() {
     {
       id: uid(), company: "NPO法人 Salon de Kid's ネット", platform: "クラウドワークス",
       work: "WordPressサイトリニューアル", reward: 35000,
-      status: "進行中", reply: "相手待ち", deadline: dStr(4),
-      note: "クラウドワークス経由。画像の利用許諾を要確認。",
-      received: "", replyDraft: "", repliedAt: null,
-      replyUrl: "https://crowdworks.jp/proposals/000000",
+      status: "進行中", reply: "要返信", deadline: dStr(4),
+      note: "クラウドワークス経由。メッセージで2件の確認待ち。",
+      received: "（別トーク）公開予定日についても、候補日をいくつかご提示いただけますでしょうか。",
+      replyDraft: "", repliedAt: null,
+      replyUrl: "https://crowdworks.jp/mypage/messages",
       tasks: [
+        reply("画像の利用許諾の可否を返信"),
+        reply("公開予定日の候補を返信"),
         task("クライアント支給素材の反映", null, "later", true),
-        task("画像の利用許諾を確認", 2, "waiting"),
         task("WordPress本番環境へ移行", 4, "today"),
       ],
       createdAt: Date.now(),
@@ -132,13 +134,12 @@ function makeSample() {
       id: uid(), company: "HARUTAS / Kitchen.Work", platform: "直契約",
       work: "住宅ECブログ執筆（note・楽天、週2〜3本）", reward: 0,
       status: "進行中", reply: "要返信", deadline: dStr(2),
-      note: "継続案件。Chatworkで記事テーマをやり取り。",
+      note: "継続案件。1通のメッセージで2用件 → 返信は1件にまとめる。",
       received: "２点ご連絡です。①次回のnote記事のテーマは「狭小住宅の収納術」で進めていただけますか。②前回の楽天記事、見出しを2つ追加でご対応お願いできますか。お手すきにご返信ください。",
       replyDraft: "", repliedAt: null,
-      replyUrl: "https://www.chatwork.com/#!rid000000001",
+      replyUrl: "https://www.chatwork.com/",
       tasks: [
-        reply("次回記事テーマの確認に返信"),
-        reply("前回記事の修正依頼に返信"),
+        reply("テーマ確認と記事修正の件に返信"),
         task("note記事を2本執筆", 2, "today"),
         task("楽天ブログ記事を1本執筆", 5, "later"),
       ],
@@ -160,12 +161,13 @@ function makeSample() {
       id: uid(), company: "サイエンスウェブ（SWT）", platform: "直契約",
       work: "LP制作（PhotoIUPAC 2028 ほか）", reward: 0,
       status: "進行中", reply: "要返信", deadline: dStr(6),
-      note: "Chatworkでデザイン確認中。",
-      received: "LP初稿を拝見しました。ファーストビューの配色について何点かご相談したく、ご返信いただけますと幸いです。",
+      note: "別トークで2件の問い合わせ（配色の相談・別件の見積り依頼）→ 返信は2件。",
+      received: "（別件のご相談です）日本超特価部品のデモサイトについて、別ページの追加分のお見積りをお願いできますでしょうか。",
       replyDraft: "", repliedAt: null,
-      replyUrl: "https://www.chatwork.com/#!rid000000002",
+      replyUrl: "https://www.chatwork.com/",
       tasks: [
-        reply("LP初稿のフィードバックに返信"),
+        reply("配色の相談に返信"),
+        reply("追加デモの見積り依頼に返信"),
         task("PhotoIUPAC 2028 LPのデザイン調整", 3, "today"),
         task("日本超特価部品デモの修正", 6, "later"),
       ],
@@ -177,7 +179,7 @@ function makeSample() {
       status: "進行中", reply: "なし", deadline: dStr(3),
       note: "クラウドワークス経由。",
       received: "", replyDraft: "", repliedAt: null,
-      replyUrl: "https://crowdworks.jp/proposals/000001",
+      replyUrl: "https://crowdworks.jp/mypage/messages",
       tasks: [
         task("FX記事の構成を作成", 1, "today"),
         task("FX記事の本文を執筆", 3, "later"),
@@ -188,12 +190,13 @@ function makeSample() {
       id: uid(), company: "GeNieee（南るな様）", platform: "直契約",
       work: "Chatworkリマインダーツール（テスト案件）", reward: 0,
       status: "進行中", reply: "要返信", deadline: dStr(2),
-      note: "GAS開発。Chatworkでやり取り。",
-      received: "テスト版をお試しいただきありがとうございます。検知のタイミングについて1点ご確認させてください。ご都合よいときにご返信ください。",
+      note: "GAS開発。Chatworkで2件のやり取り。",
+      received: "（別トーク）リマインダーの文面テンプレートについてもご相談したく、ご返信ください。",
       replyDraft: "", repliedAt: null,
-      replyUrl: "https://www.chatwork.com/#!rid000000003",
+      replyUrl: "https://www.chatwork.com/",
       tasks: [
-        reply("南様へテスト結果を返信"),
+        reply("テスト結果の所感を返信"),
+        reply("文面テンプレートの相談に返信"),
         task("GASリマインダーの動作テスト", 2, "today"),
       ],
       createdAt: Date.now(),
@@ -527,11 +530,12 @@ function FocusView({ kpi, projects, onOpen }) {
                 </span>
                 <span style={{ ...S.replyItemDue, color: "#FF922B" }}>本日中</span>
               </button>
-              {p.replyUrl && (
-                <a href={p.replyUrl} target="_blank" rel="noopener noreferrer" style={S.replyItemLink}>
-                  <ExternalLink size={13} strokeWidth={2.4} />開く
+              {p.replyUrl && (() => { const li = linkInfo(p.replyUrl); return (
+                <a href={p.replyUrl} target="_blank" rel="noopener noreferrer"
+                  style={{ ...S.replyItemLink, color: li.color, background: li.color + "22" }} title={li.label}>
+                  <ExternalLink size={13} strokeWidth={2.4} />{li.short}
                 </a>
-              )}
+              ); })()}
             </div>
           ))}
 
@@ -642,7 +646,8 @@ function ProjectsView({ projects, onOpen }) {
 
 function ProjectCard({ p, onOpen }) {
   const d = dueMeta(p.deadline);
-  const rm = REPLY_META[p.reply] || REPLY_META["なし"];
+  const replyN = replyTasksOf(p).length;
+  const li = linkInfo(p.replyUrl);
   const done = p.tasks.filter((t) => t.done).length;
   const total = p.tasks.length;
   return (
@@ -664,15 +669,16 @@ function ProjectCard({ p, onOpen }) {
         </div>
 
         <div style={S.cardFoot}>
-          {p.reply !== "なし" && (
-            <span style={{ ...S.replyPill, color: rm.color, background: rm.bg }}>
-              <Reply size={11} strokeWidth={2.4} />{rm.label}
+          {replyN > 0 && (
+            <span style={{ ...S.replyPill, color: "#FF922B", background: "rgba(255,146,43,0.15)" }}>
+              <Reply size={11} strokeWidth={2.4} />要返信{replyN}
             </span>
           )}
-          {p.reply === "要返信" && p.replyUrl && (
-            <a href={p.replyUrl} target="_blank" rel="noopener noreferrer" style={S.openLinkCard}
-              onClick={(e) => e.stopPropagation()} title="返信先を開く">
-              <ExternalLink size={12} strokeWidth={2.4} />開く
+          {li && (
+            <a href={p.replyUrl} target="_blank" rel="noopener noreferrer"
+              style={{ ...S.openLinkCard, color: li.color, background: li.color + "22" }}
+              onClick={(e) => e.stopPropagation()} title={li.label}>
+              <ExternalLink size={12} strokeWidth={2.4} />{li.short}
             </a>
           )}
           {total > 0 && (
@@ -1203,11 +1209,11 @@ function Drawer({ draft, onClose, onSave, onDelete, confirmDel, onConfirmDelete,
                 placeholder={urlHint(d.platform)}
                 onChange={(e) => set("replyUrl", e.target.value)} />
             </Field>
-            {d.replyUrl && (
-              <a href={d.replyUrl} target="_blank" rel="noopener noreferrer" style={S.openDestBtn}>
-                <ExternalLink size={14} strokeWidth={2.4} />返信先を開く
+            {d.replyUrl && (() => { const li = linkInfo(d.replyUrl); return (
+              <a href={d.replyUrl} target="_blank" rel="noopener noreferrer" style={{ ...S.openDestBtn, color: li.color, borderColor: li.color + "55" }}>
+                <ExternalLink size={14} strokeWidth={2.4} />{li.label}
               </a>
-            )}
+            ); })()}
 
             <div style={S.assistBtnRow}>
               <button style={{ ...S.genBtn, ...(generating ? S.genBtnBusy : {}) }} onClick={generateReply} disabled={generating || extracting}>
@@ -1300,6 +1306,13 @@ function SettingsModal({ onClose }) {
     try { await window.storage.set("cockpit:apikey", key.trim()); setSaved(true); setTimeout(() => setSaved(false), 1600); } catch {}
   };
 
+  const [resetting, setResetting] = useState(false);
+  const resetSample = async () => {
+    if (!resetting) { setResetting(true); return; }
+    try { await window.storage.set(STORE_KEY, JSON.stringify(normalizeProjects(makeSample()))); } catch {}
+    if (typeof window !== "undefined" && window.location && window.location.reload) window.location.reload();
+  };
+
   return (
     <>
       <div style={S.scrim} onClick={onClose} />
@@ -1318,6 +1331,12 @@ function SettingsModal({ onClose }) {
           </Field>
           <div style={S.settingWarn}>キーはこのブラウザ内にのみ保存され、Anthropic API以外には送信されません。共用端末では入力しないでください。</div>
           <button style={S.saveBtn} onClick={save} disabled={!loaded}>{saved ? "保存しました" : "保存"}</button>
+
+          <div style={S.settingDivider} />
+          <div style={S.settingNote}>サンプルデータに戻します。この端末・ブラウザに保存中の案件・タスクはすべて消えます。</div>
+          <button style={{ ...S.resetBtn, ...(resetting ? S.resetBtnConfirm : {}) }} onClick={resetSample}>
+            {resetting ? "本当にリセットしますか？（もう一度タップ）" : "サンプルデータに戻す（リセット）"}
+          </button>
         </div>
       </div>
     </>
@@ -1451,6 +1470,15 @@ function urlHint(platform) {
     case "ココナラ": return "ココナラのトークルームのURL";
     default: return "ChatworkルームのURL / メールスレッドのURL など";
   }
+}
+// 返信先URLから「○○を開く」ラベルとアクセント色を判定
+function linkInfo(url) {
+  if (!url) return null;
+  if (url.includes("chatwork")) return { label: "Chatworkを開く", short: "Chatwork", color: "#FF9F43" };
+  if (url.includes("crowdworks")) return { label: "クラウドワークスを開く", short: "クラウドワークス", color: "#54B8F0" };
+  if (url.includes("lancers")) return { label: "ランサーズを開く", short: "ランサーズ", color: "#54B8F0" };
+  if (url.includes("coconala")) return { label: "ココナラを開く", short: "ココナラ", color: "#FF8A5B" };
+  return { label: "返信先を開く", short: "開く", color: C.accent };
 }
 function blankDraft() {
   return { id: uid(), company: "", platform: "クラウドワークス", work: "", reward: "",
@@ -1739,6 +1767,9 @@ const S = {
   modalBody: { padding: 18, display: "flex", flexDirection: "column", gap: 13 },
   settingNote: { fontSize: 14.5, color: C.ink2, lineHeight: 1.6 },
   settingWarn: { fontSize: 14, color: C.ink3, lineHeight: 1.5, background: C.panel2, borderRadius: 8, padding: "8px 10px" },
+  settingDivider: { height: 1, background: C.line, margin: "4px 0" },
+  resetBtn: { border: `1px solid ${C.line}`, background: C.panel2, color: C.ink2, borderRadius: 9, padding: "10px 14px", fontSize: 13, fontWeight: 700 },
+  resetBtnConfirm: { border: "1px solid rgba(255,107,107,0.5)", background: "rgba(255,107,107,0.13)", color: "#FF6B6B" },
 
   /* task group */
   taskGroup: { marginBottom: 16 },
