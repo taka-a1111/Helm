@@ -481,8 +481,8 @@ export default function App() {
   const active = useMemo(() => projects.filter((p) => p.status !== "完了" && p.id !== INBOX_ID), [projects]);
   const kpi = useMemo(() => {
     const needReply = active.reduce((s, p) => s + replyTasksOf(p).length, 0);
-    const weekDue = active.filter((p) => dueDaysList(p).some((n) => n >= 0 && n <= 7)).length;
-    const overdue = active.filter((p) => dueDaysList(p).some((n) => n < 0)).length;
+    const weekDue = active.reduce((s, p) => s + dueDaysList(p).filter((n) => n >= 0 && n <= 7).length, 0);
+    const overdue = active.reduce((s, p) => s + dueDaysList(p).filter((n) => n < 0).length, 0);
     const revenue = active.reduce((s, p) => s + (Number(p.reward) || 0), 0);
     return { needReply, weekDue, overdue, inProgress: active.length, revenue };
   }, [active]);
@@ -606,6 +606,9 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
   const titleOf = { reply: "本日中に返信", weekDue: "7日以内が締切の案件", overdue: "期限を過ぎている案件", progress: "進行中の案件" };
   const panelColor = cards.find((c) => c.key === openCard)?.color || C.accent;
   const panelList = openCard === "reply" ? replyEntries : (openCard ? lists[openCard] : []);
+  const panelCount = (openCard === "weekDue" || openCard === "overdue")
+    ? panelList.reduce((s, p) => s + dueItemsOf(p).filter((it) => openCard === "overdue" ? it.n < 0 : (it.n >= 0 && it.n <= 7)).length, 0)
+    : panelList.length;
 
   return (
     <div style={S.colWrap}>
@@ -635,7 +638,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
           <div style={S.replyPanelHead}>
             <span style={{ ...S.replyPanelDot, background: panelColor }} />
             <span style={S.replyPanelTitle}>{titleOf[openCard]}</span>
-            <span style={S.replyPanelNum}>{panelList.length}件</span>
+            <span style={S.replyPanelNum}>{panelCount}件</span>
             <button style={S.replyPanelClose} onClick={() => setOpenCard(null)}><X size={17} /></button>
           </div>
           {panelList.length === 0 && <div style={S.replyPanelEmpty}>該当する項目はありません。</div>}
@@ -831,6 +834,13 @@ function ProjectCard({ p, onOpen, onSetDeadline, onAddTask, onUpdateTask }) {
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [editId, setEditId] = useState(null);
+  const [editFocus, setEditFocus] = useState("title");
+  const dateRef = useRef(null);
+  useEffect(() => {
+    if (editId && editFocus === "date" && dateRef.current) {
+      try { dateRef.current.focus(); dateRef.current.showPicker && dateRef.current.showPicker(); } catch {}
+    }
+  }, [editId, editFocus]);
   const openTasks = p.tasks
     .filter((t) => !t.done && t.kind !== "reply")
     .sort((a, b) => {
@@ -869,9 +879,10 @@ function ProjectCard({ p, onOpen, onSetDeadline, onAddTask, onUpdateTask }) {
         <div style={S.cardTaskList}>
           {showTasks.map((t) => {
             if (editId === t.id) {
+              const dateField = t.start ? "start" : "due";
               return (
                 <div key={t.id} style={S.cardTaskEdit} onClick={stop} onPointerDown={stop}>
-                  <input autoFocus style={S.cardTaskEditInput} value={t.title}
+                  <input autoFocus={editFocus !== "date"} style={S.cardTaskEditInput} value={t.title}
                     placeholder="やること"
                     onChange={(e) => upd(t.id, { title: e.target.value })}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); setEditId(null); } }} />
@@ -879,11 +890,13 @@ function ProjectCard({ p, onOpen, onSetDeadline, onAddTask, onUpdateTask }) {
                     <label style={S.cardTaskEditField}>
                       <span style={S.cardTaskEditLabel}>いつやる</span>
                       <input type="date" style={S.cardTaskEditDate} value={t.start || ""}
+                        ref={editFocus === "date" && dateField === "start" ? dateRef : null}
                         onClick={openPickerInput} onChange={(e) => upd(t.id, { start: e.target.value })} />
                     </label>
                     <label style={S.cardTaskEditField}>
                       <span style={S.cardTaskEditLabel}>期限</span>
                       <input type="date" style={S.cardTaskEditDate} value={t.due || ""}
+                        ref={editFocus === "date" && dateField === "due" ? dateRef : null}
                         onClick={openPickerInput} onChange={(e) => upd(t.id, { due: e.target.value })} />
                     </label>
                   </div>
@@ -892,12 +905,16 @@ function ProjectCard({ p, onOpen, onSetDeadline, onAddTask, onUpdateTask }) {
             }
             const lab = dateLabelJP(taskJudgeDate(t));
             return (
-              <div key={t.id} style={S.cardTaskRow}
-                onPointerDown={stop}
-                onClick={(e) => { stop(e); setEditId(t.id); }}>
+              <div key={t.id} style={S.cardTaskRow} onPointerDown={stop}
+                onClick={(e) => { stop(e); setEditFocus("title"); setEditId(t.id); }}>
                 <span style={S.cardTaskDot} />
-                <span style={S.cardTaskTitle}>{t.title || "（無題）"}</span>
-                {lab && <span style={lab.overdue ? S.cardTaskOver : S.cardTaskDate}>{lab.text}</span>}
+                <span style={S.cardTaskTitle}
+                  onClick={(e) => { stop(e); setEditFocus("title"); setEditId(t.id); }}>{t.title || "（無題）"}</span>
+                {lab
+                  ? <span style={lab.overdue ? S.cardTaskOver : S.cardTaskDate}
+                      onClick={(e) => { stop(e); setEditFocus("date"); setEditId(t.id); }}>{lab.text}</span>
+                  : <span style={S.cardTaskDate}
+                      onClick={(e) => { stop(e); setEditFocus("date"); setEditId(t.id); }}>日付</span>}
               </div>
             );
           })}
@@ -1877,7 +1894,12 @@ function CalendarView({ projects, onOpen }) {
   const byDate = {};
   const push = (k, item) => { (byDate[k] = byDate[k] || []).push(item); };
   projects.forEach((p) => {
-    (p.tasks || []).forEach((t) => { if (t.due && !t.done) push(t.due, { kind: "task", label: t.title, color: TASK_LANES.find((L) => L.key === (t.lane || "later"))?.color || "#9AA4B2", project: p }); });
+    (p.tasks || []).forEach((t) => {
+      if (t.done) return;
+      if (t.kind === "reply") { if (t.due) push(t.due, { kind: "task", label: t.title, color: C.accent, project: p }); return; }
+      const dates = [...new Set([t.start, t.due].filter(Boolean))];
+      dates.forEach((dk) => push(dk, { kind: "task", label: t.title, color: C.accent, project: p }));
+    });
     if (p.deadline && p.id !== INBOX_ID && p.status !== "完了") push(p.deadline, { kind: "deadline", label: `${p.company}：納期`, color: "#FF6B6B", project: p });
   });
 
