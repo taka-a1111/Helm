@@ -37,7 +37,8 @@ import { createRoot } from "https://esm.sh/react-dom@18.2.0/client?deps=react@18
 import {
   LayoutDashboard, Briefcase, ListChecks, Plus, X, Trash2, Reply,
   Clock, CheckCircle2, Circle, AlertTriangle, Inbox, Sparkles, Copy, Check,
-  CalendarDays, Coins, ExternalLink, GripVertical, Settings, ChevronLeft, ChevronRight, ListPlus, Download, Upload
+  CalendarDays, Coins, ExternalLink, GripVertical, Settings, ChevronLeft, ChevronRight, ListPlus, Download, Upload,
+  AlignLeft, CornerDownRight, Link2
 } from "https://esm.sh/lucide-react@0.383.0?deps=react@18.2.0";
 
 /* ============================================================
@@ -1598,50 +1599,39 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
             </div>
           )}
 
-          <Field label="案件名">
-            <input style={S.input} value={d.company} placeholder="案件名"
-              onKeyDown={enterClose}
-              onChange={(e) => set("company", e.target.value)} />
-          </Field>
+          <input style={S.titleInput} value={d.company} placeholder="案件名"
+            onKeyDown={enterClose}
+            onChange={(e) => set("company", e.target.value)} />
 
-          <div style={S.row2}>
-            <Field label="契約先">
-              <select style={S.input} value={d.platform} onChange={(e) => set("platform", e.target.value)}>
-                {Object.keys(PLATFORMS).map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </Field>
-            <Field label="報酬（円）">
-              <input style={S.input} type="number" value={d.reward} placeholder="0"
-                onKeyDown={enterClose}
-                onChange={(e) => set("reward", e.target.value)} />
-            </Field>
+          <div style={S.infoRow}>
+            <AlignLeft size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
+            <textarea style={S.infoInput} value={d.note} placeholder="詳細" rows={1}
+              onChange={(e) => set("note", e.target.value)} />
           </div>
 
-          <div style={S.row2}>
-            <Field label="ステータス">
-              <select style={S.input} value={d.status} onChange={(e) => set("status", e.target.value)}>
-                {STATUSES.map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </Field>
-            <Field label="返信状況">
-              <select style={S.input} value={d.reply} onChange={(e) => set("reply", e.target.value)}>
-                {REPLIES.map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </Field>
+          <div style={S.infoRow}>
+            <Coins size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
+            <input style={S.infoInput} type="number" value={d.reward} placeholder="報酬（円）"
+              onKeyDown={enterClose} onChange={(e) => set("reward", e.target.value)} />
           </div>
 
-          <Field label="期限">
-            <input style={S.input} type="date" value={d.deadline}
+          <div style={S.infoRow}>
+            <Clock size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
+            <input style={S.infoInput} type="date" value={d.deadline}
               onKeyDown={enterClose}
               onClick={(e) => { try { e.target.showPicker && e.target.showPicker(); } catch {} }}
               onChange={(e) => set("deadline", e.target.value)} />
-          </Field>
+          </div>
 
-          <Field label="詳細">
-            <textarea style={{ ...S.input, minHeight: 56, resize: "vertical" }} value={d.note}
-              placeholder="詳細"
-              onChange={(e) => set("note", e.target.value)} />
-          </Field>
+          <div style={S.infoRow}>
+            <Briefcase size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
+            <select style={S.infoSelect} value={d.platform} onChange={(e) => set("platform", e.target.value)}>
+              {Object.keys(PLATFORMS).map((x) => <option key={x}>{x}</option>)}
+            </select>
+            <select style={S.infoSelect} value={d.status} onChange={(e) => set("status", e.target.value)}>
+              {STATUSES.map((x) => <option key={x}>{x}</option>)}
+            </select>
+          </div>
 
           {/* ===== やり取り（AI返信案） ===== */}
           <div style={S.replyBlock}>
@@ -1653,18 +1643,20 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
               )}
             </div>
 
-            <Field label="相手から届いたメッセージ">
-              <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={d.received}
+            <div style={S.infoRow}>
+              <Reply size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
+              <textarea style={S.infoInput} value={d.received} rows={1}
                 placeholder="届いたメッセージ"
                 onChange={(e) => set("received", e.target.value)} />
-            </Field>
+            </div>
 
-            <Field label="返信先URL">
-              <input style={S.input} value={d.replyUrl} type="url"
-                placeholder="URL"
+            <div style={S.infoRow}>
+              <Link2 size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
+              <input style={S.infoInput} value={d.replyUrl} type="url"
+                placeholder="返信先URL"
                 onKeyDown={enterClose}
                 onChange={(e) => set("replyUrl", e.target.value)} />
-            </Field>
+            </div>
             {d.replyUrl && (() => { const li = linkInfo(d.replyUrl); return (
               <a href={d.replyUrl} target="_blank" rel="noopener noreferrer" style={{ ...S.openDestBtn, color: li.color, borderColor: li.color + "55" }}>
                 <ExternalLink size={14} strokeWidth={2.4} />{li.label}
@@ -1704,12 +1696,12 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
           </div>
 
           {/* ===== tasks ===== */}
-          <div style={S.taskBlockHead}>
-            <span style={S.fieldLabel}>タスク</span>
-            <button style={S.addTaskBtn} onClick={addTask}><Plus size={13} strokeWidth={2.6} />追加</button>
+          <div style={S.subtaskHead}>
+            <CornerDownRight size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
+            <span style={S.subtaskHeadLabel}>タスク</span>
+            <button style={S.subtaskAddBtn} onClick={addTask}><Plus size={14} strokeWidth={2.6} />追加</button>
           </div>
           <div style={S.taskEditList}>
-            {d.tasks.length === 0 && <div style={S.taskEmpty}>タスクはまだありません</div>}
             {d.tasks.map((t) => (
               <div key={t.id} style={S.taskEditRow}>
                 <div style={S.taskEditTop}>
@@ -2328,8 +2320,17 @@ const S = {
   focusDateLabel: { fontSize: 14, color: C.ink2, fontWeight: 600, flexShrink: 0 },
   focusDateInput: { flex: 1, minWidth: 0, border: `1px solid ${C.line}`, background: C.panel2, color: C.ink, borderRadius: 8, padding: "7px 9px", fontSize: 14 },
   focusTaskNote: { fontSize: 14, color: C.ink3 },
-  drawerBody: { flex: 1, overflowY: "auto", overscrollBehavior: "contain", padding: 18, display: "flex", flexDirection: "column", gap: 14 },
+  drawerBody: { flex: 1, overflowY: "auto", overscrollBehavior: "contain", padding: 18, display: "flex", flexDirection: "column", gap: 8 },
   drawerFoot: { display: "flex", alignItems: "center", gap: 8, padding: "13px 18px", borderTop: `1px solid ${C.line}`, background: C.panel },
+
+  titleInput: { width: "100%", background: "transparent", border: "none", outline: "none", color: C.ink, fontFamily: F.disp, fontWeight: 700, fontSize: 24, lineHeight: 1.3, padding: "4px 2px 10px", resize: "none" },
+  infoRow: { display: "flex", alignItems: "flex-start", gap: 14, padding: "10px 2px", borderTop: `1px solid ${C.line}` },
+  infoIcon: { flexShrink: 0, marginTop: 2 },
+  infoInput: { flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none", color: C.ink, fontSize: 16, padding: "2px 0", resize: "none", fontFamily: "inherit", lineHeight: 1.5 },
+  infoSelect: { flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none", color: C.ink, fontSize: 16, padding: "2px 0" },
+  subtaskHead: { display: "flex", alignItems: "center", gap: 14, padding: "10px 2px 4px", borderTop: `1px solid ${C.line}` },
+  subtaskHeadLabel: { flex: 1, fontSize: 16, color: C.ink2, fontWeight: 600 },
+  subtaskAddBtn: { display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: C.accent, fontSize: 14.5, fontWeight: 700, padding: "2px 4px" },
 
   field: { display: "flex", flexDirection: "column", gap: 6 },
   fieldLabel: { fontSize: 14.5, fontWeight: 700, color: C.ink2, letterSpacing: 0.2 },
