@@ -847,7 +847,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onAddTask, onUpdateTask }) {
   const submitTask = () => { const t = newTitle.trim(); if (t) { onAddTask && onAddTask(p.id, "later", t); setNewTitle(""); } };
   const upd = (tid, patch) => onUpdateTask && onUpdateTask(p.id, tid, patch);
   return (
-    <div style={S.card} role="button" tabIndex={0} onClick={() => onOpen(p)}>
+    <div style={S.card} role="button" tabIndex={0} onClick={() => { if (editId) setEditId(null); else onOpen(p); }}>
       {replyN > 0 && (
         <div style={S.cardHead}>
           <span style={S.cardReplyPill}><Reply size={12} strokeWidth={2.4} />要返信{replyN}</span>
@@ -870,7 +870,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onAddTask, onUpdateTask }) {
           {showTasks.map((t) => {
             if (editId === t.id) {
               return (
-                <div key={t.id} style={S.cardTaskEdit} onClick={stop}>
+                <div key={t.id} style={S.cardTaskEdit} onClick={stop} onPointerDown={stop}>
                   <input autoFocus style={S.cardTaskEditInput} value={t.title}
                     placeholder="やること"
                     onChange={(e) => upd(t.id, { title: e.target.value })}
@@ -886,14 +886,15 @@ function ProjectCard({ p, onOpen, onSetDeadline, onAddTask, onUpdateTask }) {
                       <input type="date" style={S.cardTaskEditDate} value={t.due || ""}
                         onClick={openPickerInput} onChange={(e) => upd(t.id, { due: e.target.value })} />
                     </label>
-                    <button style={S.cardTaskEditDone} onClick={() => setEditId(null)}>完了</button>
                   </div>
                 </div>
               );
             }
             const lab = dateLabelJP(taskJudgeDate(t));
             return (
-              <div key={t.id} style={S.cardTaskRow} onClick={(e) => { stop(e); setEditId(t.id); }}>
+              <div key={t.id} style={S.cardTaskRow}
+                onPointerDown={stop}
+                onClick={(e) => { stop(e); setEditId(t.id); }}>
                 <span style={S.cardTaskDot} />
                 <span style={S.cardTaskTitle}>{t.title || "（無題）"}</span>
                 {lab && <span style={lab.overdue ? S.cardTaskOver : S.cardTaskDate}>{lab.text}</span>}
