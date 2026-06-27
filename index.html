@@ -523,9 +523,7 @@ export default function App() {
       <header style={S.header}>
         <div style={{ ...S.brand, cursor: "pointer" }} onClick={() => { if (typeof window !== "undefined") window.location.reload(); }} title="タップで再読み込み">
           <div style={S.brandMark}>H</div>
-          <div>
-            <div style={S.brandTitle}>Helm</div>
-          </div>
+          <div style={S.brandDate}>{(() => { const d = new Date(); return `${d.getMonth() + 1}月${d.getDate()}日（${WD_JP[d.getDay()]}）`; })()}</div>
         </div>
         <nav style={S.tabs}>
           {[
@@ -541,9 +539,6 @@ export default function App() {
         </nav>
         <button style={S.iconBtnHeader} onClick={() => setShowSettings(true)} title="設定（APIキー）" aria-label="設定">
           <Settings size={18} strokeWidth={2} />
-        </button>
-        <button style={S.addBtnIcon} onClick={() => setEditing(blankDraft())} title="案件を追加" aria-label="案件を追加">
-          <Plus size={20} strokeWidth={2.6} />
         </button>
       </header>
 
@@ -2159,22 +2154,23 @@ const S = {
   center: { display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" },
 
   header: {
-    position: "sticky", top: 0, zIndex: 20, display: "flex", alignItems: "center", gap: 14,
-    padding: "12px 20px", background: "rgba(15,19,24,0.82)", backdropFilter: "blur(10px)",
-    borderBottom: `1px solid ${C.line}`, flexWrap: "wrap",
+    position: "sticky", top: 0, zIndex: 20, display: "flex", alignItems: "center", gap: 9,
+    padding: "10px 14px", background: "rgba(15,19,24,0.82)", backdropFilter: "blur(10px)",
+    borderBottom: `1px solid ${C.line}`, flexWrap: "nowrap",
   },
-  brand: { display: "flex", alignItems: "center", gap: 10, marginRight: "auto" },
+  brand: { display: "flex", alignItems: "center", gap: 10, marginRight: "auto", flexShrink: 0 },
   brandMark: {
     width: 34, height: 34, borderRadius: 9, background: C.accent, color: "#fff",
     display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14,
   },
   brandTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 16, letterSpacing: 0.2, lineHeight: 1.1 },
+  brandDate: { fontFamily: F.disp, fontWeight: 700, fontSize: 15, color: C.ink, letterSpacing: 0.2, whiteSpace: "nowrap" },
   brandSub: { fontSize: 14, color: C.ink3, marginTop: 2 },
 
   tabs: { display: "flex", gap: 4, background: C.panel2, padding: 4, borderRadius: 12, border: `1px solid ${C.line}` },
   tab: {
     display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent",
-    color: C.ink3, width: 54, height: 44, borderRadius: 10, transition: "color 0.12s, background 0.12s",
+    color: C.ink3, width: 48, height: 42, borderRadius: 10, transition: "color 0.12s, background 0.12s",
   },
   tabOn: { background: C.panel, color: C.accent, boxShadow: "0 1px 3px rgba(0,0,0,0.35)" },
   tabLabel: {},
