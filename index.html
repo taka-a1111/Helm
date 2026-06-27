@@ -611,18 +611,22 @@ function ProjectsView({ projects, onOpen }) {
   const [fPlat, setFPlat] = useState("すべて");
   const [fStatus, setFStatus] = useState("すべて");
   const [fReply, setFReply] = useState(false);
+  const [hideDone, setHideDone] = useState(true);
 
   const filtered = projects
     .filter((p) => p.id !== INBOX_ID)
+    .filter((p) => !hideDone || p.status !== "完了")
     .filter((p) => fPlat === "すべて" || p.platform === fPlat)
     .filter((p) => fStatus === "すべて" || p.status === fStatus)
-    .filter((p) => !fReply || p.reply === "要返信")
+    .filter((p) => !fReply || replyTasksOf(p).length > 0)
     .sort((a, b) => {
       const an = daysUntil(a.deadline), bn = daysUntil(b.deadline);
       if (an === null && bn === null) return 0;
       if (an === null) return 1; if (bn === null) return -1;
       return an - bn;
     });
+
+  const doneCount = projects.filter((p) => p.id !== INBOX_ID && p.status === "完了").length;
 
   return (
     <div style={S.colWrap}>
@@ -633,6 +637,12 @@ function ProjectsView({ projects, onOpen }) {
           style={{ ...S.replyFilter, ...(fReply ? S.replyFilterOn : {}) }}>
           <Reply size={13} strokeWidth={2.4} /> 要返信のみ
         </button>
+        {doneCount > 0 && (
+          <button onClick={() => setHideDone((v) => !v)}
+            style={{ ...S.replyFilter, ...(hideDone ? S.replyFilterOn : {}) }}>
+            <CheckCircle2 size={13} strokeWidth={2.4} /> 完了を隠す
+          </button>
+        )}
         <span style={S.resultCount}>{filtered.length}件</span>
       </div>
 
@@ -881,16 +891,17 @@ function TaskCard({ t, lane, onToggle, onOpen, dragging, moveOpen, onHandlePoint
         {t.done ? <CheckCircle2 size={18} color="#51CF66" strokeWidth={2.2} />
                 : <Circle size={18} color="#3A434F" strokeWidth={2.2} />}
       </button>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }}
+        onClick={() => { if (t.project.id !== INBOX_ID) onOpen(t.project); }}>
         <div style={{ ...S.tcardTitle, ...(t.done ? S.trowDone : {}) }}>
           {t.kind === "reply" && <Reply size={13} color="#FF922B" strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-1px" }} />}
           {t.title || "（無題）"}
         </div>
         <div style={S.tcardMeta}>
-          <button style={S.tcardProject} onClick={() => { if (t.project.id !== INBOX_ID) onOpen(t.project); }}>
+          <span style={S.tcardProject}>
             <PlatformChip name={t.project.platform} small />
             <span style={S.tcardCompany}>{t.project.company}</span>
-          </button>
+          </span>
           {t.kind === "reply" && !t.done && <span style={{ ...S.dueMini, color: "#FF922B" }}>本日中</span>}
           {t.kind !== "reply" && t.due && !t.done && <span style={{ ...S.dueMini, color: d.color }}>{d.text}</span>}
         </div>
@@ -1698,13 +1709,13 @@ const S = {
   resultCount: { marginLeft: "auto", fontSize: 12, color: C.ink3, fontWeight: 600, fontFamily: F.disp },
 
   /* card grid */
-  grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 13 },
+  grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 13, alignItems: "stretch" },
   card: {
-    position: "relative", textAlign: "left", padding: 0, overflow: "hidden",
-    background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14,
+    position: "relative", textAlign: "left", padding: 0, overflow: "hidden", height: "100%",
+    display: "flex", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, cursor: "pointer",
   },
   cardBar: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
-  cardInner: { padding: "14px 15px 13px 18px" },
+  cardInner: { flex: 1, display: "flex", flexDirection: "column", padding: "14px 15px 13px 18px" },
   cardHead: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 9 },
   statusDot: { fontSize: 11.5, fontWeight: 700 },
   cardCompany: { fontWeight: 700, fontSize: 14.5, lineHeight: 1.3, marginBottom: 3 },
@@ -1713,7 +1724,7 @@ const S = {
   cardMeta: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 11 },
   cardReward: { fontFamily: F.disp, fontWeight: 700, fontSize: 16, fontVariantNumeric: "tabular-nums" },
   cardDue: { display: "flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, fontFamily: F.disp },
-  cardFoot: { display: "flex", alignItems: "center", gap: 8, paddingTop: 11, borderTop: `1px solid ${C.line}` },
+  cardFoot: { display: "flex", alignItems: "center", gap: 8, paddingTop: 11, marginTop: "auto", borderTop: `1px solid ${C.line}` },
   cardTasks: { display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, color: C.ink3, fontWeight: 600, marginLeft: "auto", fontFamily: F.disp },
 
   /* tasks view */
