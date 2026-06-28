@@ -1188,8 +1188,6 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
               onClick={() => { if (g.project.id !== INBOX_ID) onOpen(g.project); }}>
               <span style={{ ...S.taskGroupBar, background: PLATFORMS[g.project.platform] || C.accent }} />
               <span style={S.taskGroupName}>{g.project.company}</span>
-              <PlatformChip name={g.project.platform} small />
-              <span style={S.taskGroupCount}>{g.tasks.filter((t) => !t.done).length}</span>
             </button>
             <div style={S.list}>
               {g.tasks.map((t) => (
@@ -1278,25 +1276,6 @@ function TaskCard({ t, lane, onToggle, onOpen, onOpenTask, onEditTask, dragging,
           )}
         </div>
       )}
-
-      <div style={S.moveWrap}>
-        <button style={S.moveBtn} onPointerDown={(e) => onHandlePointerDown(e, t)}
-          title="ドラッグで移動 / タップでメニュー">
-          <GripVertical size={16} color="#5E6675" />
-        </button>
-        {moveOpen && (
-          <>
-            <div style={S.movePopScrim} onClick={() => onMove(lane)} />
-            <div style={S.movePop}>
-              {TASK_LANES.filter((x) => x.key !== lane).map((x) => (
-                <button key={x.key} style={S.moveItem} onClick={() => onMove(x.key)}>
-                  <span style={{ ...S.laneDot, background: x.color }} />{x.label}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
     </div>
   );
 }
@@ -1972,13 +1951,30 @@ function CalendarView({ projects, onOpen }) {
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.3) { e.stopPropagation(); dx < 0 ? nextM() : prevM(); }
   };
 
+  // 今月を起点に前後の月ボタンを並べる（Googleカレンダー風）。押すとその月へ
+  const stripRef = useRef(null);
+  const monthStrip = [];
+  for (let i = -3; i <= 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    monthStrip.push({ y: d.getFullYear(), m: d.getMonth() });
+  }
+  useEffect(() => {
+    const el = stripRef.current && stripRef.current.querySelector('[data-on="1"]');
+    if (el && el.scrollIntoView) el.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [ym]);
+
   return (
     <div style={S.colWrap}>
-      <div style={S.calBar}>
-        <button style={S.calNav} onClick={prevM}><ChevronLeft size={18} /></button>
-        <span style={S.calTitle}>{ym.y}年 {ym.m + 1}月</span>
-        <button style={S.calNav} onClick={nextM}><ChevronRight size={18} /></button>
-        <button style={S.calToday} onClick={goToday}>今日</button>
+      <div style={S.calMonthStrip} ref={stripRef}>
+        {monthStrip.map((mm) => {
+          const on = mm.y === ym.y && mm.m === ym.m;
+          const label = mm.m === 0 ? `${mm.y}年1月` : `${mm.m + 1}月`;
+          return (
+            <button key={`${mm.y}-${mm.m}`} data-on={on ? "1" : "0"}
+              style={{ ...S.calMonthBtn, ...(on ? S.calMonthBtnOn : {}) }}
+              onClick={() => setYm({ y: mm.y, m: mm.m })}>{label}</button>
+          );
+        })}
       </div>
 
       <div style={S.calGrid} onTouchStart={onCalTouchStart} onTouchEnd={onCalTouchEnd}>
@@ -2613,6 +2609,9 @@ const S = {
 
   /* calendar */
   calBar: { display: "flex", alignItems: "center", gap: 10 },
+  calMonthStrip: { display: "flex", gap: 8, overflowX: "auto", paddingBottom: 8, marginBottom: 12, scrollbarWidth: "none" },
+  calMonthBtn: { flexShrink: 0, border: `1px solid ${C.line}`, background: C.panel, color: C.ink2, borderRadius: 999, padding: "7px 15px", fontSize: 15, fontWeight: 700, whiteSpace: "nowrap", fontFamily: F.disp },
+  calMonthBtnOn: { background: C.accent, borderColor: C.accent, color: "#fff" },
   calNav: { border: `1px solid ${C.line}`, background: C.panel, borderRadius: 9, padding: 7, display: "flex", color: C.ink },
   calTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 17, minWidth: 130, textAlign: "center" },
   calToday: { marginLeft: "auto", border: `1px solid ${C.line}`, background: C.panel, borderRadius: 9, padding: "7px 14px", fontSize: 14.5, fontWeight: 700, color: C.ink },
