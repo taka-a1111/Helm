@@ -1069,7 +1069,10 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
                   onClick={(e) => { stop(e); onToggleTask && onToggleTask(p.id, t.id); }} title="タスクを完了">
                   <Circle size={18} color={C.ink3} strokeWidth={2} />
                 </button>
-                <span style={S.cardTaskTitle}>{t.title || "（無題）"}</span>
+                <span style={S.cardTaskTitle}>
+                  {t.repeat && <Repeat size={13} color={C.accent} strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-2px" }} />}
+                  {t.title || "（無題）"}
+                </span>
                 {lab && <span style={lab.overdue ? S.cardTaskOver : S.cardTaskDate}
                   onClick={(e) => { stop(e); onEditTask && onEditTask(p.id, t.id, "title"); }}>{lab.text}</span>}
               </div>
@@ -2324,7 +2327,7 @@ const S = {
   sortItemOn: { background: C.accent + "26", color: C.accent, fontWeight: 700 },
   viewDot: { width: 7, height: 7, borderRadius: "50%", background: C.line, transition: "background 0.15s, width 0.15s" },
   viewDotOn: { background: C.accent, width: 20 },
-  colWrap: { display: "flex", flexDirection: "column", gap: 22 },
+  colWrap: { display: "flex", flexDirection: "column", gap: 22, width: "100%", maxWidth: 720, marginLeft: "auto", marginRight: "auto" },
 
   /* KPI */
   /* reply panel (要返信一覧) */
