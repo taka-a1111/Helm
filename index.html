@@ -454,13 +454,11 @@ export default function App() {
     pullingRef.current = true;
     try {
       const remote = await gasGet(s);
-      if (remote && remote.data) {
-        if (remote.rev > revRef.current) {
-          await adopt(remote.data, remote.rev);
-        } else if (remote.rev === revRef.current && !dirtyRef.current
-                   && JSON.stringify(normalizeProjects(remote.data)) !== JSON.stringify(projectsRef.current)) {
-          await adopt(remote.data, remote.rev); // 同リビジョンだが内容差あり→サーバ採用で収束
-        } else {
+      if (remote && remote.data && !dirtyRef.current) {
+        const remoteNorm = normalizeProjects(remote.data);
+        if (JSON.stringify(remoteNorm) !== JSON.stringify(projectsRef.current)) {
+          await adopt(remote.data, remote.rev); // 内容が違う＝他端末で更新あり→取り込む
+        } else if (remote.rev !== revRef.current) {
           revRef.current = remote.rev; saveMeta();
         }
       }
@@ -529,7 +527,7 @@ export default function App() {
     const onFocus = () => cloudPull();
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onFocus);
-    const id = setInterval(() => { if (document.visibilityState === "visible") cloudPull(); }, 20000);
+    const id = setInterval(() => { if (document.visibilityState === "visible") cloudPull(); }, 12000);
     return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onFocus); clearInterval(id); };
   }, []);
 
@@ -654,19 +652,41 @@ export default function App() {
       return prev;
     });
   };
-  // タスクの並び替え（同一案件内）：ドラッグ中は表示のみ、離した時にcommitOrderで保存
-  const reorderTaskVisual = (pid, dragTid, overTid) => {
+  // タスクの並び替え：案件内・案件またぎの両方に対応。ドラッグ中は表示のみ、離した時にcommitOrderで保存
+  const reorderTaskVisual = (dragTid, overPid, overTid) => {
     if (dragTid === overTid) return;
-    setProjects((prev) => prev.map((p) => {
-      if (p.id !== pid) return p;
-      const from = p.tasks.findIndex((t) => t.id === dragTid);
-      const to = p.tasks.findIndex((t) => t.id === overTid);
-      if (from < 0 || to < 0) return p;
-      const arr = [...p.tasks];
-      const [m] = arr.splice(from, 1);
-      arr.splice(to, 0, m);
-      return { ...p, tasks: arr };
-    }));
+    setProjects((prev) => {
+      let srcPid = null;
+      for (const p of prev) { if (p.tasks.some((t) => t.id === dragTid)) { srcPid = p.id; break; } }
+      if (!srcPid) return prev;
+      if (srcPid === overPid) {
+        return prev.map((p) => {
+          if (p.id !== srcPid) return p;
+          const from = p.tasks.findIndex((t) => t.id === dragTid);
+          const to = p.tasks.findIndex((t) => t.id === overTid);
+          if (from < 0 || to < 0) return p;
+          const a = [...p.tasks]; const [m] = a.splice(from, 1); a.splice(to, 0, m);
+          return { ...p, tasks: a };
+        });
+      }
+      // 案件またぎ：移動元から取り出し、移動先の overTid の位置へ挿入
+      let moved = null;
+      const removed = prev.map((p) => {
+        if (p.id !== srcPid) return p;
+        const from = p.tasks.findIndex((t) => t.id === dragTid);
+        if (from < 0) return p;
+        const a = [...p.tasks]; const [m] = a.splice(from, 1); moved = m;
+        return { ...p, tasks: a };
+      });
+      if (!moved) return prev;
+      return removed.map((p) => {
+        if (p.id !== overPid) return p;
+        const to = p.tasks.findIndex((t) => t.id === overTid);
+        const a = [...p.tasks];
+        a.splice(to < 0 ? a.length : to, 0, moved);
+        return { ...p, tasks: a };
+      });
+    });
   };
 
   /* ---- derived ---- */
@@ -838,7 +858,6 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
   };
 
   const cards = [
-    { key: "reply", label: "要返信", value: kpi.needReply, unit: "件", color: "#6B8AFF", Icon: Reply, hot: kpi.needReply > 0 },
     { key: "weekDue", label: "7日以内", value: kpi.weekDue, unit: "件", color: "#9AA4B2", Icon: CalendarDays },
     { key: "overdue", label: "期限超過", value: kpi.overdue, unit: "件", color: "#FF6B6B", Icon: AlertTriangle, hot: kpi.overdue > 0 },
     { key: "progress", label: "進行中の見込み", value: kpi.revenue ? yenMan(kpi.revenue) : "—", unit: "", color: "#E8ECF2", Icon: Coins, wide: true, count: kpi.inProgress },
@@ -865,7 +884,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
                 <span style={{ ...S.kpiLabel, ...(opened ? { color: C.ink, fontWeight: 700 } : {}) }}>{c.label}</span>
                 <c.Icon size={17} color={c.color} strokeWidth={2.2} />
               </div>
-              <div style={{ ...S.kpiValue, color: c.color, fontSize: c.wide ? 22 : 28 }}>
+              <div style={{ ...S.kpiValue, color: c.color, fontSize: c.wide ? 19 : 26 }}>
                 {c.value}<span style={S.kpiUnit}>{c.unit}</span>
               </div>
               {opened && <span style={{ ...S.kpiHint, color: c.color, fontWeight: 700 }}>▲ 閉じる</span>}
@@ -1109,7 +1128,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
   const cardUp = () => { if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = null; } };
   return (
     <div data-pid={p.id}
-      style={{ ...S.card, ...(statusTint ? { background: statusTint.bg, borderColor: statusTint.border } : {}), ...(dragging ? S.cardDragging : {}), ...(dragActive && !dragging ? S.cardDragOther : {}) }}
+      style={{ ...S.card, ...(statusTint ? { background: statusTint.bg, borderColor: statusTint.border } : {}), ...(dragging ? S.cardDragging : {}), ...(dragActive && !dragging ? S.cardDragOther : {}), touchAction: dragActive ? "none" : "pan-y" }}
       role="button" tabIndex={0}
       onPointerDown={cardDown} onPointerMove={cardMove} onPointerUp={cardUp} onPointerCancel={cardUp}
       onClick={() => onOpen(p)}>
@@ -1183,12 +1202,13 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
    タスクビュー（横タブ・横スワイプ切替・ポインタD&D）
    ============================================================ */
 function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onAddTask, onReorderTask, onReorderCommit, activeLane, setActiveLane }) {
-  const [adding, setAdding] = useState(false);
+  const wide = useWideScreen();
+  const [adding, setAdding] = useState(null); // 追加中のレーンキー（null=なし）
   const [hideDone, setHideDone] = useState(false);
   const [dragTid, setDragTid] = useState(null);
 
-  // 長押し→上下ドラッグでタスクを並べ替え（同一案件内）
-  const startTaskDrag = (pid, tid, el, pointerId) => {
+  // 長押し→上下ドラッグでタスクを並べ替え（同一レーン内なら案件をまたいでも移動可）
+  const startTaskDrag = (pid, tid, el, pointerId, dragLane) => {
     try { el && el.setPointerCapture && pointerId != null && el.setPointerCapture(pointerId); } catch {}
     setDragTid(tid);
     const move = (ev) => {
@@ -1198,7 +1218,9 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
       if (row) {
         const overTid = row.getAttribute("data-tid");
         const overPid = row.getAttribute("data-pid");
-        if (overPid === pid && overTid && overTid !== tid) onReorderTask && onReorderTask(pid, tid, overTid);
+        const laneEl = row.closest && row.closest("[data-lane]");
+        const overLane = laneEl ? laneEl.getAttribute("data-lane") : dragLane;
+        if (overLane === dragLane && overTid && overTid !== tid) onReorderTask && onReorderTask(tid, overPid, overTid);
       }
     };
     const up = () => {
@@ -1223,7 +1245,6 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
   const countOf = (lane) => {
     const st = laneStatusOf(lane);
     if (!st) return all.filter((t) => t._lane === lane && !t.done).length;
-    // 相手待ち/支払い待ち：タスクがあればその数、無ければ案件1件として数える
     let c = 0;
     projects.forEach((p) => { if (p.id !== INBOX_ID && p.status === st) { const n = openTasksOf(p).length; c += n > 0 ? n : 1; } });
     return c;
@@ -1231,28 +1252,88 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
   const laneTasks = (lane) => all
     .filter((t) => t._lane === lane)
     .filter((t) => !(hideDone && t.done))
-    .sort((a, b) => (a.done === b.done ? 0 : a.done ? 1 : -1)); // 完了のみ末尾。未完了は案件内の手動順（p.tasks順）を維持
+    .sort((a, b) => (a.done === b.done ? 0 : a.done ? 1 : -1));
 
-  const activeMeta = TASK_LANES.find((L) => L.key === activeLane) || TASK_LANES[0];
-  const items = laneTasks(activeLane);
-
-  // 案件ごとにグループ化（案件名見出し → その案件のタスク）
-  const groups = [];
-  const gmap = new Map();
-  items.forEach((t) => {
-    if (!gmap.has(t.project.id)) { const g = { project: t.project, tasks: [] }; gmap.set(t.project.id, g); groups.push(g); }
-    gmap.get(t.project.id).tasks.push(t);
-  });
-  // 相手待ち/支払い待ち：タスクが無い該当案件も「案件行」として表示
-  const laneStatus = laneStatusOf(activeLane);
-  if (laneStatus) {
-    projects.forEach((p) => {
-      if (p.id === INBOX_ID || p.status !== laneStatus || gmap.has(p.id)) return;
-      groups.push({ project: p, tasks: [], projectOnly: true });
+  // レーンごとの案件グループを構築
+  const buildGroups = (lane) => {
+    const items = laneTasks(lane);
+    const groups = []; const gmap = new Map();
+    items.forEach((t) => {
+      if (!gmap.has(t.project.id)) { const g = { project: t.project, tasks: [] }; gmap.set(t.project.id, g); groups.push(g); }
+      gmap.get(t.project.id).tasks.push(t);
     });
-  }
-  const hasAny = groups.length > 0;
+    const st = laneStatusOf(lane);
+    if (st) projects.forEach((p) => { if (p.id === INBOX_ID || p.status !== st || gmap.has(p.id)) return; groups.push({ project: p, tasks: [], projectOnly: true }); });
+    return groups;
+  };
 
+  const renderGroups = (lane, groups) => groups.map((g) => (
+    <div key={g.project.id} style={S.taskGroup}>
+      <button style={S.taskGroupHead} onClick={() => { if (g.project.id !== INBOX_ID) onOpen(g.project); }}>
+        <span style={{ ...S.taskGroupBar, background: PLATFORMS[g.project.platform] || C.accent }} />
+        <span style={S.taskGroupName}>{g.project.company}</span>
+      </button>
+      <div style={S.list}>
+        {g.projectOnly ? (
+          <button style={S.tcard} onClick={() => onOpen(g.project)}>
+            <span style={{ ...S.waitRowIcon, color: lane === "payment" ? "#51CF66" : "#D9A23B" }}>{lane === "payment" ? "💰" : "⏳"}</span>
+            <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+              <div style={S.tcardTitle}>{lane === "payment" ? "入金待ち" : "先方の返信・対応待ち"}</div>
+              {g.project.deadline && <div style={S.tcardMeta}><span style={S.tcardCompany}>納期 {dateLabelJP(g.project.deadline).text}</span></div>}
+            </div>
+          </button>
+        ) : g.tasks.map((t) => (
+          <TaskCard key={t.id} t={t} lane={lane}
+            onToggle={onToggle} onOpen={onOpen} onOpenTask={onOpenTask} onEditTask={onEditTask}
+            dragging={dragTid === t.id} dragActive={dragTid !== null}
+            onStartDrag={startTaskDrag}
+            onChangeStart={(start) => onChangeStart(t.project.id, t.id, start)}
+            onChangeDue={(due) => onChangeDue(t.project.id, t.id, due)} />
+        ))}
+      </div>
+    </div>
+  ));
+
+  // ===== PC：4レーンを横並び（カンバン） =====
+  if (wide) {
+    return (
+      <div style={S.colWrap}>
+        <div style={S.kanTop}>
+          <button style={{ ...S.replyFilter, ...(hideDone ? S.replyFilterOn : {}) }} onClick={() => setHideDone((v) => !v)}>
+            <CheckCircle2 size={13} strokeWidth={2.4} /> 完了を隠す
+          </button>
+        </div>
+        <div style={S.kanban}>
+          {TASK_LANES.map((L) => {
+            const groups = buildGroups(L.key);
+            return (
+              <div key={L.key} style={S.kanbanCol} data-lane={L.key}>
+                <div style={S.kanColHead}>
+                  <span style={{ ...S.laneDot, background: L.color }} />
+                  <span style={S.kanColTitle}>{L.label}</span>
+                  <span style={S.kanColCount}>{countOf(L.key)}</span>
+                  <button style={S.kanAdd} onClick={() => setAdding(adding === L.key ? null : L.key)}><Plus size={15} strokeWidth={2.6} /></button>
+                </div>
+                {adding === L.key && (
+                  <AddTaskInline projects={projects}
+                    onAdd={(pid, title) => { onAddTask(pid, L.key, title); setAdding(null); }}
+                    onCancel={() => setAdding(null)} />
+                )}
+                <div style={S.kanColBody}>
+                  {groups.length === 0 ? <div style={S.kanEmpty}>なし</div> : renderGroups(L.key, groups)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // ===== スマホ：タブで1レーンずつ =====
+  const activeMeta = TASK_LANES.find((L) => L.key === activeLane) || TASK_LANES[0];
+  const groups = buildGroups(activeLane);
+  const hasAny = groups.length > 0;
   return (
     <div style={S.colWrap}>
       <div style={S.taskTabs}>
@@ -1276,48 +1357,20 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
           onClick={() => setHideDone((v) => !v)}>
           <CheckCircle2 size={13} strokeWidth={2.4} /> 完了を隠す
         </button>
-        <button style={S.laneBarAdd} onClick={() => setAdding((v) => !v)}>
+        <button style={S.laneBarAdd} onClick={() => setAdding(adding ? null : activeLane)}>
           <Plus size={15} strokeWidth={2.6} /> 追加
         </button>
       </div>
 
       {adding && (
         <AddTaskInline projects={projects}
-          onAdd={(pid, title) => { onAddTask(pid, activeLane, title); setAdding(false); }}
-          onCancel={() => setAdding(false)} />
+          onAdd={(pid, title) => { onAddTask(pid, activeLane, title); setAdding(null); }}
+          onCancel={() => setAdding(null)} />
       )}
 
-      <div style={S.swipeArea}>
+      <div style={S.swipeArea} data-lane={activeLane}>
         {!hasAny && !adding && <Empty text="このレーンにタスクはありません。" />}
-        {groups.map((g) => (
-          <div key={g.project.id} style={S.taskGroup}>
-            <button style={S.taskGroupHead}
-              onClick={() => { if (g.project.id !== INBOX_ID) onOpen(g.project); }}>
-              <span style={{ ...S.taskGroupBar, background: PLATFORMS[g.project.platform] || C.accent }} />
-              <span style={S.taskGroupName}>{g.project.company}</span>
-            </button>
-            <div style={S.list}>
-              {g.projectOnly ? (
-                <button style={S.tcard} onClick={() => onOpen(g.project)}>
-                  <span style={{ ...S.waitRowIcon, color: activeLane === "payment" ? "#51CF66" : "#D9A23B" }}>
-                    {activeLane === "payment" ? "💰" : "⏳"}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
-                    <div style={S.tcardTitle}>{activeLane === "payment" ? "入金待ち" : "先方の返信・対応待ち"}</div>
-                    {g.project.deadline && <div style={S.tcardMeta}><span style={S.tcardCompany}>納期 {dateLabelJP(g.project.deadline).text}</span></div>}
-                  </div>
-                </button>
-              ) : g.tasks.map((t) => (
-                <TaskCard key={t.id} t={t} lane={activeLane}
-                  onToggle={onToggle} onOpen={onOpen} onOpenTask={onOpenTask} onEditTask={onEditTask}
-                  dragging={dragTid === t.id} dragActive={dragTid !== null}
-                  onStartDrag={startTaskDrag}
-                  onChangeStart={(start) => onChangeStart(t.project.id, t.id, start)}
-                  onChangeDue={(due) => onChangeDue(t.project.id, t.id, due)} />
-              ))}
-            </div>
-          </div>
-        ))}
+        {renderGroups(activeLane, groups)}
       </div>
     </div>
   );
@@ -1342,7 +1395,7 @@ function TaskCard({ t, lane, onToggle, onOpen, onOpenTask, onEditTask, dragging,
     if (e.target.closest && e.target.closest("button, input, a, label")) return; // 操作系は除外
     downInfo.current = { el: e.currentTarget, pointerId: e.pointerId, x: e.clientX, y: e.clientY };
     lpTimer.current = setTimeout(() => {
-      if (downInfo.current && onStartDrag) onStartDrag(t.project.id, t.id, downInfo.current.el, downInfo.current.pointerId);
+      if (downInfo.current && onStartDrag) onStartDrag(t.project.id, t.id, downInfo.current.el, downInfo.current.pointerId, lane);
     }, 180);
   };
   const tmove = (e) => {
@@ -2049,6 +2102,7 @@ function SettingsModal({ onClose, sync, syncState, onSaveSync, onSyncPush, onSyn
    カレンダービュー（タスク期限・案件納期を月表示）
    ============================================================ */
 function CalendarView({ projects, onOpen }) {
+  const wide = useWideScreen();
   const now = new Date();
   const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() });
   const pad = (n) => String(n).padStart(2, "0");
@@ -2108,7 +2162,8 @@ function CalendarView({ projects, onOpen }) {
 
   return (
     <div style={S.colWrap}>
-      <div style={S.calBlock}>
+      <div style={wide ? S.calRow : { display: "contents" }}>
+      <div style={{ ...S.calBlock, ...(wide ? S.calLeft : {}) }}>
       <div style={S.calGrid} onTouchStart={onCalTouchStart} onTouchEnd={onCalTouchEnd}>
         {WD.map((w, i) => (
           <div key={w} style={{ ...S.calWd, color: i === 0 ? "#FF6B6B" : i === 6 ? C.ink3 : C.ink3 }}>{w}</div>
@@ -2146,7 +2201,7 @@ function CalendarView({ projects, onOpen }) {
       </div>
       </div>
 
-      <div style={S.calDetail}>
+      <div style={{ ...S.calDetail, ...(wide ? S.calRight : {}) }}>
         <div style={S.calDetailHead}>
           <CalendarDays size={15} color={C.accent} strokeWidth={2.2} />
           <span style={S.calDetailDate}>{selLabel}</span>
@@ -2164,6 +2219,7 @@ function CalendarView({ projects, onOpen }) {
             <span style={{ ...S.calDetailKind, color: it.color }}>{it.kind === "deadline" ? "納期" : "タスク"}</span>
           </button>
         ))}
+      </div>
       </div>
     </div>
   );
@@ -2461,12 +2517,12 @@ const S = {
   replyItemName: { fontWeight: 700, fontSize: 16.5, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   replyItemLink: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.16)", padding: "6px 11px", borderRadius: 8, textDecoration: "none", flexShrink: 0, whiteSpace: "nowrap" },
 
-  kpiRow: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
-  kpiCard: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "11px 13px", textAlign: "left", width: "100%" },
+  kpiRow: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 },
+  kpiCard: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: "10px 11px", textAlign: "left", width: "100%" },
   kpiCardBtn: { cursor: "pointer" },
   kpiHint: { display: "block", marginTop: 4, fontSize: 13, color: C.ink3, fontWeight: 600 },
   kpiTop: { display: "flex", alignItems: "center", justifyContent: "space-between" },
-  kpiLabel: { fontSize: 13.5, color: C.ink2, fontWeight: 600 },
+  kpiLabel: { fontSize: 12.5, color: C.ink2, fontWeight: 600, whiteSpace: "nowrap" },
   kpiValue: { fontFamily: F.disp, fontWeight: 700, marginTop: 3, lineHeight: 1, fontVariantNumeric: "tabular-nums" },
   kpiUnit: { fontSize: 13, marginLeft: 3, fontWeight: 500 },
 
@@ -2800,6 +2856,18 @@ const S = {
   /* calendar */
   calBar: { display: "flex", alignItems: "center", gap: 10 },
   calBlock: { display: "flex", flexDirection: "column", gap: 10 },
+  kanTop: { display: "flex", justifyContent: "flex-end" },
+  kanban: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, alignItems: "start" },
+  kanbanCol: { background: "rgba(255,255,255,0.015)", border: `1px solid ${C.line}`, borderRadius: 14, padding: 10, display: "flex", flexDirection: "column", gap: 10, minWidth: 0 },
+  kanColHead: { display: "flex", alignItems: "center", gap: 7, padding: "2px 2px 0" },
+  kanColTitle: { fontWeight: 700, fontSize: 14.5, color: C.ink },
+  kanColCount: { fontFamily: F.disp, fontSize: 13, fontWeight: 700, color: C.ink3, background: C.panel2, borderRadius: 8, padding: "1px 7px" },
+  kanAdd: { marginLeft: "auto", border: "none", background: "transparent", color: C.accent, display: "inline-flex", alignItems: "center", padding: 2 },
+  kanColBody: { display: "flex", flexDirection: "column", gap: 14, minWidth: 0 },
+  kanEmpty: { fontSize: 13, color: C.ink3, padding: "8px 2px" },
+  calRow: { display: "flex", gap: 18, alignItems: "flex-start" },
+  calLeft: { flex: "0 0 430px", maxWidth: 430, minWidth: 0 },
+  calRight: { flex: 1, minWidth: 0, marginTop: 0 },
   calMonthStrip: { display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "none" },
   calMonthBtn: { flexShrink: 0, border: `1px solid ${C.line}`, background: C.panel, color: C.ink2, borderRadius: 999, padding: "7px 15px", fontSize: 15, fontWeight: 700, whiteSpace: "nowrap", fontFamily: F.disp },
   calMonthBtnOn: { background: C.accent, borderColor: C.accent, color: "#fff" },
