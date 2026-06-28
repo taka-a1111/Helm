@@ -951,6 +951,10 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
   const replyN = replyTasksOf(p).length;
   const li = linkInfo(p.replyUrl);
   const dl = p.deadline ? dateLabelJP(p.deadline) : null;
+  // ステータス別のカード色（相手待ち＝琥珀／支払い待ち＝緑）
+  const statusTint =
+    p.status === "相手待ち"   ? { bg: "rgba(217,162,59,0.07)", border: "rgba(217,162,59,0.38)" } :
+    p.status === "支払い待ち" ? { bg: "rgba(81,207,102,0.07)", border: "rgba(81,207,102,0.34)" } : null;
   const lpTimer = useRef(null);
   const downInfo = useRef(null);
   const openTasks = p.tasks
@@ -986,13 +990,15 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
   const cardUp = () => { if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = null; } };
   return (
     <div data-pid={p.id}
-      style={{ ...S.card, ...(dragging ? S.cardDragging : {}), ...(dragActive && !dragging ? S.cardDragOther : {}) }}
+      style={{ ...S.card, ...(statusTint ? { background: statusTint.bg, borderColor: statusTint.border } : {}), ...(dragging ? S.cardDragging : {}), ...(dragActive && !dragging ? S.cardDragOther : {}) }}
       role="button" tabIndex={0}
       onPointerDown={cardDown} onPointerMove={cardMove} onPointerUp={cardUp} onPointerCancel={cardUp}
       onClick={() => onOpen(p)}>
-      {replyN > 0 && (
+      {(replyN > 0 || statusTint) && (
         <div style={S.cardHead}>
-          <span style={S.cardReplyPill}><Reply size={12} strokeWidth={2.4} />要返信{replyN}</span>
+          {replyN > 0 && <span style={S.cardReplyPill}><Reply size={12} strokeWidth={2.4} />要返信{replyN}</span>}
+          {p.status === "相手待ち" && <span style={S.statusPillWait}>相手待ち</span>}
+          {p.status === "支払い待ち" && <span style={S.statusPillPay}>支払い待ち</span>}
         </div>
       )}
 
@@ -2352,12 +2358,14 @@ const S = {
   },
   cardBar: { display: "none" },
   cardInner: { flex: 1, display: "flex", flexDirection: "column" },
-  cardHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 9, minHeight: 20 },
+  cardHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 9, minHeight: 20, justifyContent: "flex-end" },
   cardGrip: { display: "inline-flex", alignItems: "center", justifyContent: "center", color: C.ink3, cursor: "grab", touchAction: "none", marginLeft: -4, marginRight: "auto", padding: "2px 2px" },
   cardDragging: { opacity: 0.85, boxShadow: `0 0 0 2px ${C.accent}, 0 10px 24px rgba(0,0,0,0.45)`, cursor: "grabbing" },
   cardDragOther: { transition: "transform 0.12s ease" },
   cardStatus: { display: "none" },
-  cardReplyPill: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 13.5, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.15)", padding: "3px 9px", borderRadius: 7, marginLeft: "auto" },
+  cardReplyPill: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 13.5, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.15)", padding: "3px 9px", borderRadius: 7 },
+  statusPillWait: { display: "inline-flex", alignItems: "center", fontSize: 13, fontWeight: 700, color: "#D9A23B", background: "rgba(217,162,59,0.15)", padding: "3px 10px", borderRadius: 7 },
+  statusPillPay: { display: "inline-flex", alignItems: "center", fontSize: 13, fontWeight: 700, color: "#51CF66", background: "rgba(81,207,102,0.15)", padding: "3px 10px", borderRadius: 7 },
   statusDot: { display: "none" },
   cardCompanyRow: { display: "flex", alignItems: "center", gap: 12, marginBottom: 8 },
   cardCheck: { display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", padding: 2, flexShrink: 0, cursor: "pointer" },
