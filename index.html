@@ -334,7 +334,6 @@ export default function App() {
   const [view, setView] = useState("focus");
   const [navStack, setNavStack] = useState([]); // 画面遷移の履歴（戻る用）
   const [activeLane, setActiveLane] = useState("today"); // タスク画面のレーン（上部スワイプで切替）
-  const wide = useWideScreen(); // PCではタスク画面を横幅いっぱいに広げる
   const VIEWS = ["focus", "tasks", "calendar"];
   useEffect(() => { try { window.scrollTo(0, 0); const m = document.querySelector("main"); if (m) m.scrollTop = 0; } catch {} }, [view]);
   const go = (v) => { if (v !== view) { setNavStack((s) => [...s, view]); setView(v); } };
@@ -783,9 +782,9 @@ export default function App() {
       </header>
 
       {/* ===== Body ===== */}
-      <main style={{ ...S.main, ...(wide && view === "tasks" ? S.mainWide : {}) }} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
+      <main style={S.main} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
         {view === "focus" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={setEditing} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} />}
-        {view === "tasks" && <TasksView projects={projects} onToggle={toggleTask} onOpen={setEditing} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} activeLane={activeLane} setActiveLane={setActiveLane} />}
+        {view === "tasks" && <TasksView projects={projects} onToggle={toggleTask} onToggleProject={toggleProjectDone} onOpen={setEditing} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderCommit={commitOrder} activeLane={activeLane} setActiveLane={setActiveLane} />}
         {view === "calendar" && <CalendarView projects={projects} onOpen={setEditing} />}
       </main>
 
@@ -997,6 +996,9 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
             return (
               <div key={p.id} style={S.replyItem}>
                 <button style={S.replyItemMain} onClick={() => onOpen(p)}>
+                  {p.id !== INBOX_ID && (
+                    <span onClick={(e) => { e.stopPropagation(); onToggleProject && onToggleProject(p.id); }} style={S.replyItemCheck} title="案件を完了"><Circle size={18} color={C.ink3} strokeWidth={2} /></span>
+                  )}
                   <span style={S.replyItemCol}>
                     <span style={S.replyItemName}>{p.company}</span>
                     {openCard === "progress" && (
@@ -1253,7 +1255,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
 /* ============================================================
    タスクビュー（横タブ・横スワイプ切替・ポインタD&D）
    ============================================================ */
-function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onAddTask, onReorderTask, onReorderCommit, onToggleProject, activeLane, setActiveLane }) {
+function TasksView({ projects, onToggle, onToggleProject, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onAddTask, onReorderTask, onReorderCommit, activeLane, setActiveLane }) {
   const wide = useWideScreen();
   const [adding, setAdding] = useState(null); // 追加中のレーンキー（null=なし）
   const [hideDone, setHideDone] = useState(false);
@@ -1321,17 +1323,15 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
 
   const renderGroups = (lane, groups) => groups.map((g) => (
     <div key={g.project.id} style={S.taskGroup}>
-      <button style={S.taskGroupHead} onClick={() => { if (g.project.id !== INBOX_ID) onOpen(g.project); }}>
-        {g.project.id !== INBOX_ID && (
-          <span style={S.groupCheck} title="案件を完了"
-            onClick={(e) => { e.stopPropagation(); onToggleProject && onToggleProject(g.project.id); }}>
-            <Circle size={18} color="#3A434F" strokeWidth={2.2} />
-          </span>
-        )}
-        <span style={{ ...S.taskGroupBar, background: PLATFORMS[g.project.platform] || C.accent }} />
-        <span style={S.taskGroupName}>{g.project.company}</span>
-      </button>
-      <div style={S.list}>
+      <div style={S.taskGroupHead}>
+        {g.project.id !== INBOX_ID
+          ? <span onClick={(e) => { e.stopPropagation(); onToggleProject && onToggleProject(g.project.id); }} style={S.taskGroupCheck} title="案件を完了"><Circle size={18} color={C.ink3} strokeWidth={2} /></span>
+          : <span style={{ ...S.taskGroupBar, background: C.ink3 }} />}
+        <button style={S.taskGroupNameBtn} onClick={() => { if (g.project.id !== INBOX_ID) onOpen(g.project); }}>
+          <span style={S.taskGroupName}>{g.project.company}</span>
+        </button>
+      </div>
+      <div style={{ ...S.list, paddingLeft: 28 }}>
         {g.projectOnly ? (
           <button style={S.tcard} onClick={() => onOpen(g.project)}>
             <span style={{ ...S.waitRowIcon, color: lane === "payment" ? "#51CF66" : "#D9A23B" }}>{lane === "payment" ? "💰" : "⏳"}</span>
@@ -1355,7 +1355,7 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
   // ===== PC：4レーンを横並び（カンバン） =====
   if (wide) {
     return (
-      <div style={S.kanWrap}>
+      <div style={S.colWrap}>
         <div style={S.kanTop}>
           <button style={{ ...S.replyFilter, ...(hideDone ? S.replyFilterOn : {}) }} onClick={() => setHideDone((v) => !v)}>
             <CheckCircle2 size={13} strokeWidth={2.4} /> 完了を隠す
@@ -2587,7 +2587,6 @@ const S = {
   addLabel: {},
 
   main: { padding: "20px 16px 64px", maxWidth: 1120, margin: "0 auto" },
-  mainWide: { maxWidth: "none", paddingLeft: 24, paddingRight: 24 },
   viewDots: { display: "flex", justifyContent: "center", gap: 7, marginBottom: 14 },
   focusFilterBar: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 },
   sortWrap: { position: "relative", display: "flex", justifyContent: "flex-end", marginBottom: 12 },
@@ -2640,12 +2639,13 @@ const S = {
   msgOpenProject: { alignSelf: "flex-start", border: "none", background: "transparent", color: "#6B8AFF", fontSize: 14, fontWeight: 700, padding: 0, marginTop: 2 },
   replyItemReward: { fontFamily: F.disp, fontSize: 14, fontWeight: 700, color: C.ink2 },
   replyItemDueSub: { fontSize: 14, fontWeight: 700, fontFamily: F.disp },
-  dueTaskList: { display: "flex", flexDirection: "column", gap: 4, marginTop: 5 },
+  dueTaskList: { display: "flex", flexDirection: "column", gap: 4, marginTop: 5, paddingLeft: 6 },
   dueTaskRow: { display: "flex", alignItems: "center", gap: 8 },
   dueTaskCheck: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 18, cursor: "pointer" },
   dueTaskName: { flex: 1, minWidth: 0, fontSize: 15.5, color: C.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   dueTaskDays: { fontSize: 15.5, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap", flexShrink: 0 },
   replyItemName: { fontWeight: 700, fontSize: 16.5, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  replyItemCheck: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" },
   replyItemLink: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.16)", padding: "6px 11px", borderRadius: 8, textDecoration: "none", flexShrink: 0, whiteSpace: "nowrap" },
 
   kpiRow: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 },
@@ -2737,7 +2737,7 @@ const S = {
   cardReward: { fontFamily: F.disp, fontWeight: 800, fontSize: 16, fontVariantNumeric: "tabular-nums", letterSpacing: 0.3, color: C.ink2, marginLeft: "auto" },
   cardDue: { display: "flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
   cardDueNone: { display: "none" },
-  cardTaskList: { display: "flex", flexDirection: "column", gap: 13, marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.line}` },
+  cardTaskList: { display: "flex", flexDirection: "column", gap: 13, marginTop: 14, paddingTop: 14, paddingLeft: 32, borderTop: `1px solid ${C.line}` },
   cardTaskRow: { display: "flex", alignItems: "center", gap: 12, cursor: "pointer" },
   cardTaskCheck: { display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", padding: 2, flexShrink: 0, cursor: "pointer" },
   cardTaskEdit: { display: "flex", flexDirection: "column", gap: 8, padding: "10px 11px", background: C.panel2, border: `1px solid ${C.accent}`, borderRadius: 10 },
@@ -2914,7 +2914,7 @@ const S = {
   laneList: { display: "flex", flexDirection: "column", gap: 8 },
   laneEmpty: { border: "1.5px dashed #333B46", borderRadius: 10, padding: "14px 8px", textAlign: "center", fontSize: 14.5, color: C.ink3, fontWeight: 500 },
 
-  tcard: { display: "flex", alignItems: "flex-start", gap: 10, background: "transparent", border: "none", borderRadius: 0, padding: "6px 2px", cursor: "grab" },
+  tcard: { display: "flex", alignItems: "flex-start", gap: 10, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px 11px 12px 12px", cursor: "grab" },
   tcardDone: { opacity: 0.62, cursor: "default" },
   tcardTitle: { fontSize: 16.5, fontWeight: 700, lineHeight: 1.4, color: C.ink, wordBreak: "break-word" },
   tcardMeta: { display: "flex", alignItems: "center", gap: 7, marginTop: 6, flexWrap: "wrap" },
@@ -2982,7 +2982,8 @@ const S = {
   taskGroup: { marginBottom: 18 },
   taskGroupHead: { display: "flex", alignItems: "center", gap: 9, border: "none", background: "transparent", padding: "4px 2px 10px", width: "100%", textAlign: "left", borderBottom: `1px solid ${C.line}`, marginBottom: 10 },
   taskGroupBar: { width: 4, height: 18, borderRadius: 3, flexShrink: 0 },
-  groupCheck: { display: "flex", alignItems: "center", flexShrink: 0, cursor: "pointer", padding: 0 },
+  taskGroupCheck: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" },
+  taskGroupNameBtn: { flex: 1, minWidth: 0, display: "flex", alignItems: "center", border: "none", background: "transparent", padding: 0, textAlign: "left", cursor: "pointer" },
   taskGroupName: { fontFamily: F.disp, fontWeight: 800, fontSize: 18, letterSpacing: 0.2, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   taskGroupCount: { fontFamily: F.disp, fontSize: 14, fontWeight: 800, color: "#fff", background: C.accent, borderRadius: 20, padding: "2px 9px", minWidth: 22, textAlign: "center", marginLeft: "auto", flexShrink: 0 },
 
@@ -2991,7 +2992,6 @@ const S = {
   calBlock: { display: "flex", flexDirection: "column", gap: 10 },
   kanTop: { display: "flex", justifyContent: "flex-end" },
   kanban: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, alignItems: "start" },
-  kanWrap: { display: "flex", flexDirection: "column", gap: 22, width: "100%" },
   kanbanCol: { background: "rgba(255,255,255,0.015)", border: `1px solid ${C.line}`, borderRadius: 14, padding: 10, display: "flex", flexDirection: "column", gap: 10, minWidth: 0 },
   kanColHead: { display: "flex", alignItems: "center", gap: 7, padding: "2px 2px 0" },
   kanColTitle: { fontWeight: 700, fontSize: 14.5, color: C.ink },
