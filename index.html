@@ -334,6 +334,7 @@ export default function App() {
   const [view, setView] = useState("focus");
   const [navStack, setNavStack] = useState([]); // 画面遷移の履歴（戻る用）
   const [activeLane, setActiveLane] = useState("today"); // タスク画面のレーン（上部スワイプで切替）
+  const wide = useWideScreen(); // PCではタスク画面を横幅いっぱいに広げる
   const VIEWS = ["focus", "tasks", "calendar"];
   useEffect(() => { try { window.scrollTo(0, 0); const m = document.querySelector("main"); if (m) m.scrollTop = 0; } catch {} }, [view]);
   const go = (v) => { if (v !== view) { setNavStack((s) => [...s, view]); setView(v); } };
@@ -782,9 +783,9 @@ export default function App() {
       </header>
 
       {/* ===== Body ===== */}
-      <main style={S.main} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
+      <main style={{ ...S.main, ...(wide && view === "tasks" ? S.mainWide : {}) }} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
         {view === "focus" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={setEditing} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} />}
-        {view === "tasks" && <TasksView projects={projects} onToggle={toggleTask} onToggleProject={toggleProjectDone} onOpen={setEditing} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderCommit={commitOrder} activeLane={activeLane} setActiveLane={setActiveLane} />}
+        {view === "tasks" && <TasksView projects={projects} onToggle={toggleTask} onOpen={setEditing} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} activeLane={activeLane} setActiveLane={setActiveLane} />}
         {view === "calendar" && <CalendarView projects={projects} onOpen={setEditing} />}
       </main>
 
@@ -1255,7 +1256,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
 /* ============================================================
    タスクビュー（横タブ・横スワイプ切替・ポインタD&D）
    ============================================================ */
-function TasksView({ projects, onToggle, onToggleProject, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onAddTask, onReorderTask, onReorderCommit, activeLane, setActiveLane }) {
+function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onAddTask, onReorderTask, onReorderCommit, onToggleProject, activeLane, setActiveLane }) {
   const wide = useWideScreen();
   const [adding, setAdding] = useState(null); // 追加中のレーンキー（null=なし）
   const [hideDone, setHideDone] = useState(false);
@@ -1323,14 +1324,16 @@ function TasksView({ projects, onToggle, onToggleProject, onOpen, onOpenTask, on
 
   const renderGroups = (lane, groups) => groups.map((g) => (
     <div key={g.project.id} style={S.taskGroup}>
-      <div style={S.taskGroupHead}>
-        {g.project.id !== INBOX_ID
-          ? <span onClick={(e) => { e.stopPropagation(); onToggleProject && onToggleProject(g.project.id); }} style={S.taskGroupCheck} title="案件を完了"><Circle size={18} color={C.ink3} strokeWidth={2} /></span>
-          : <span style={{ ...S.taskGroupBar, background: C.ink3 }} />}
-        <button style={S.taskGroupNameBtn} onClick={() => { if (g.project.id !== INBOX_ID) onOpen(g.project); }}>
-          <span style={S.taskGroupName}>{g.project.company}</span>
-        </button>
-      </div>
+      <button style={S.taskGroupHead} onClick={() => { if (g.project.id !== INBOX_ID) onOpen(g.project); }}>
+        {g.project.id !== INBOX_ID && (
+          <span style={S.groupCheck} title="案件を完了"
+            onClick={(e) => { e.stopPropagation(); onToggleProject && onToggleProject(g.project.id); }}>
+            <Circle size={18} color="#3A434F" strokeWidth={2.2} />
+          </span>
+        )}
+        <span style={{ ...S.taskGroupBar, background: PLATFORMS[g.project.platform] || C.accent }} />
+        <span style={S.taskGroupName}>{g.project.company}</span>
+      </button>
       <div style={{ ...S.list, paddingLeft: 28 }}>
         {g.projectOnly ? (
           <button style={S.tcard} onClick={() => onOpen(g.project)}>
@@ -1355,7 +1358,7 @@ function TasksView({ projects, onToggle, onToggleProject, onOpen, onOpenTask, on
   // ===== PC：4レーンを横並び（カンバン） =====
   if (wide) {
     return (
-      <div style={S.colWrap}>
+      <div style={S.kanWrap}>
         <div style={S.kanTop}>
           <button style={{ ...S.replyFilter, ...(hideDone ? S.replyFilterOn : {}) }} onClick={() => setHideDone((v) => !v)}>
             <CheckCircle2 size={13} strokeWidth={2.4} /> 完了を隠す
@@ -1480,12 +1483,11 @@ function TaskCard({ t, lane, onToggle, onOpen, onOpenTask, onEditTask, dragging,
           {t.repeat && <Repeat size={13} color={C.accent} strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-1px" }} />}
           {t.title || "（無題）"}
         </div>
-        <div style={S.tcardMeta}>
-          <span style={S.tcardProject}>
-            <span style={S.tcardCompany}>{t.project.company}</span>
-          </span>
-          {t.kind === "reply" && !t.done && <span style={{ ...S.dueMini, color: "#6B8AFF" }}>本日中</span>}
-        </div>
+        {t.kind === "reply" && !t.done && (
+          <div style={S.tcardMeta}>
+            <span style={{ ...S.dueMini, color: "#6B8AFF" }}>本日中</span>
+          </div>
+        )}
       </div>
 
       {t.kind !== "reply" && (
@@ -2587,6 +2589,7 @@ const S = {
   addLabel: {},
 
   main: { padding: "20px 16px 64px", maxWidth: 1120, margin: "0 auto" },
+  mainWide: { maxWidth: "none", paddingLeft: 24, paddingRight: 24 },
   viewDots: { display: "flex", justifyContent: "center", gap: 7, marginBottom: 14 },
   focusFilterBar: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 },
   sortWrap: { position: "relative", display: "flex", justifyContent: "flex-end", marginBottom: 12 },
@@ -2914,7 +2917,7 @@ const S = {
   laneList: { display: "flex", flexDirection: "column", gap: 8 },
   laneEmpty: { border: "1.5px dashed #333B46", borderRadius: 10, padding: "14px 8px", textAlign: "center", fontSize: 14.5, color: C.ink3, fontWeight: 500 },
 
-  tcard: { display: "flex", alignItems: "flex-start", gap: 10, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px 11px 12px 12px", cursor: "grab" },
+  tcard: { display: "flex", alignItems: "flex-start", gap: 10, background: "transparent", border: "none", borderRadius: 0, padding: "6px 2px", cursor: "grab" },
   tcardDone: { opacity: 0.62, cursor: "default" },
   tcardTitle: { fontSize: 16.5, fontWeight: 700, lineHeight: 1.4, color: C.ink, wordBreak: "break-word" },
   tcardMeta: { display: "flex", alignItems: "center", gap: 7, marginTop: 6, flexWrap: "wrap" },
@@ -2982,8 +2985,7 @@ const S = {
   taskGroup: { marginBottom: 18 },
   taskGroupHead: { display: "flex", alignItems: "center", gap: 9, border: "none", background: "transparent", padding: "4px 2px 10px", width: "100%", textAlign: "left", borderBottom: `1px solid ${C.line}`, marginBottom: 10 },
   taskGroupBar: { width: 4, height: 18, borderRadius: 3, flexShrink: 0 },
-  taskGroupCheck: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" },
-  taskGroupNameBtn: { flex: 1, minWidth: 0, display: "flex", alignItems: "center", border: "none", background: "transparent", padding: 0, textAlign: "left", cursor: "pointer" },
+  groupCheck: { display: "flex", alignItems: "center", flexShrink: 0, cursor: "pointer", padding: 0 },
   taskGroupName: { fontFamily: F.disp, fontWeight: 800, fontSize: 18, letterSpacing: 0.2, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   taskGroupCount: { fontFamily: F.disp, fontSize: 14, fontWeight: 800, color: "#fff", background: C.accent, borderRadius: 20, padding: "2px 9px", minWidth: 22, textAlign: "center", marginLeft: "auto", flexShrink: 0 },
 
@@ -2992,6 +2994,7 @@ const S = {
   calBlock: { display: "flex", flexDirection: "column", gap: 10 },
   kanTop: { display: "flex", justifyContent: "flex-end" },
   kanban: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, alignItems: "start" },
+  kanWrap: { display: "flex", flexDirection: "column", gap: 22, width: "100%" },
   kanbanCol: { background: "rgba(255,255,255,0.015)", border: `1px solid ${C.line}`, borderRadius: 14, padding: 10, display: "flex", flexDirection: "column", gap: 10, minWidth: 0 },
   kanColHead: { display: "flex", alignItems: "center", gap: 7, padding: "2px 2px 0" },
   kanColTitle: { fontWeight: 700, fontSize: 14.5, color: C.ink },
