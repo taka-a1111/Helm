@@ -334,6 +334,7 @@ export default function App() {
   const [view, setView] = useState("focus");
   const [navStack, setNavStack] = useState([]); // 画面遷移の履歴（戻る用）
   const [activeLane, setActiveLane] = useState("today"); // タスク画面のレーン（上部スワイプで切替）
+  const wide = useWideScreen(); // PCではタスク画面を横幅いっぱいに広げる
   const VIEWS = ["focus", "tasks", "calendar"];
   useEffect(() => { try { window.scrollTo(0, 0); const m = document.querySelector("main"); if (m) m.scrollTop = 0; } catch {} }, [view]);
   const go = (v) => { if (v !== view) { setNavStack((s) => [...s, view]); setView(v); } };
@@ -782,7 +783,7 @@ export default function App() {
       </header>
 
       {/* ===== Body ===== */}
-      <main style={S.main} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
+      <main style={{ ...S.main, ...(wide && view === "tasks" ? S.mainWide : {}) }} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
         {view === "focus" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={setEditing} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} />}
         {view === "tasks" && <TasksView projects={projects} onToggle={toggleTask} onOpen={setEditing} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderCommit={commitOrder} activeLane={activeLane} setActiveLane={setActiveLane} />}
         {view === "calendar" && <CalendarView projects={projects} onOpen={setEditing} />}
@@ -1348,7 +1349,7 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
   // ===== PC：4レーンを横並び（カンバン） =====
   if (wide) {
     return (
-      <div style={S.colWrap}>
+      <div style={S.kanWrap}>
         <div style={S.kanTop}>
           <button style={{ ...S.replyFilter, ...(hideDone ? S.replyFilterOn : {}) }} onClick={() => setHideDone((v) => !v)}>
             <CheckCircle2 size={13} strokeWidth={2.4} /> 完了を隠す
@@ -2580,6 +2581,7 @@ const S = {
   addLabel: {},
 
   main: { padding: "20px 16px 64px", maxWidth: 1120, margin: "0 auto" },
+  mainWide: { maxWidth: "none", paddingLeft: 24, paddingRight: 24 },
   viewDots: { display: "flex", justifyContent: "center", gap: 7, marginBottom: 14 },
   focusFilterBar: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 },
   sortWrap: { position: "relative", display: "flex", justifyContent: "flex-end", marginBottom: 12 },
@@ -2982,6 +2984,7 @@ const S = {
   calBlock: { display: "flex", flexDirection: "column", gap: 10 },
   kanTop: { display: "flex", justifyContent: "flex-end" },
   kanban: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, alignItems: "start" },
+  kanWrap: { display: "flex", flexDirection: "column", gap: 22, width: "100%" },
   kanbanCol: { background: "rgba(255,255,255,0.015)", border: `1px solid ${C.line}`, borderRadius: 14, padding: 10, display: "flex", flexDirection: "column", gap: 10, minWidth: 0 },
   kanColHead: { display: "flex", alignItems: "center", gap: 7, padding: "2px 2px 0" },
   kanColTitle: { fontWeight: 700, fontSize: 14.5, color: C.ink },
