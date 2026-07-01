@@ -56,7 +56,7 @@ import {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-01e"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-01f"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
 
 // ===== 端末間同期（GAS Web App + スプレッドシート） =====
@@ -450,6 +450,7 @@ export default function App() {
   const [sync, setSync] = useState({ url: "", token: "", on: false });
   const [syncState, setSyncState] = useState({ status: "idle", at: null, msg: "" });
   const pushTimer = useRef(null);
+  const pushMaxWaitTimer = useRef(null); // 連続入力中でも定期的に push を走らせる最大待機タイマー
   const revRef = useRef(0);        // 直近にサーバと一致したリビジョン（楽観ロックの基準）
   const dirtyRef = useRef(false);  // ローカルに未送信の変更があるか
   const syncRef = useRef(sync);    // イベント内で最新の同期設定を参照
@@ -504,14 +505,21 @@ export default function App() {
     }
   };
 
-  // 変更を検知したら600msデバウンスで保存をキック（連打をまとめる）
+  // 変更を検知したら150msデバウンスで保存をキック（連打をまとめる）
   const schedulePush = (cfg) => {
     const s = cfg || syncRef.current;
     if (!s.on || !s.url || !s.token) return;
     lastEditRef.current = Date.now(); // 直近の編集時刻を記録（pullの上書き防止に使う）
     dirtyRef.current = true;
     if (pushTimer.current) clearTimeout(pushTimer.current);
-    pushTimer.current = setTimeout(() => runPush(s), 300);
+    pushTimer.current = setTimeout(() => runPush(s), 150);
+    // 連続入力でデバウンスが延々リセットされてもpushが止まらないよう、独立の最大待機タイマー（1.2s）
+    if (!pushMaxWaitTimer.current) {
+      pushMaxWaitTimer.current = setTimeout(() => {
+        pushMaxWaitTimer.current = null;
+        if (dirtyRef.current) runPush(s);
+      }, 1200);
+    }
   };
 
   // クラウドから取得し、サーバが新しければ取り込む（他端末の変更を反映）
@@ -521,7 +529,7 @@ export default function App() {
     if (!s.on || !s.url || !s.token) return;
     if (pullingRef.current) return;
     if (pushingRef.current) return;                          // 保存実行中は取得しない
-    if (!force && Date.now() - lastEditRef.current < 15000) return; // 直近15秒の編集はローカルを正とし、取り込まない
+    if (!force && Date.now() - lastEditRef.current < 5000) return; // 直近5秒の編集はローカルを正とし、取り込まない
     if (!force && Date.now() < pullSuppressRef.current) return; // 保存直後は往復取得を抑制
     if (dirtyRef.current && !force) return; // 未送信のローカル変更がある間は上書きしない
     pullingRef.current = true;
@@ -600,11 +608,18 @@ export default function App() {
 
   // 他端末の変更を反映：アプリ復帰時＋15秒ごと（編集後15秒・保存中・rev・破損の各ガードで巻き戻りは防止）
   useEffect(() => {
-    const onVis = () => { if (document.visibilityState === "visible") cloudPull(); };
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        // 復帰直後は3回続けて取得（バースト）：直近の相手端末の更新を素早く取り込む
+        cloudPull();
+        setTimeout(() => cloudPull(), 800);
+        setTimeout(() => cloudPull(), 2000);
+      }
+    };
     const onFocus = () => cloudPull();
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onFocus);
-    const id = setInterval(() => { if (document.visibilityState === "visible") cloudPull(); }, 15000);
+    const id = setInterval(() => { if (document.visibilityState === "visible") cloudPull(); }, 3000);
     return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onFocus); clearInterval(id); };
   }, []);
 
@@ -1718,9 +1733,24 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
     const empty = !d.company && !d.work && !d.note && !d.summary && !d.received
       && (!d.tasks || d.tasks.length === 0) && !d.deadline && !d.start && !d.reward && !d.replyUrl && !d.replyDraft;
     if (empty) return; // 新規で実質空なら保存しない
-    const t = setTimeout(() => { onAutoSave && onAutoSave(d); setAutoSaved(true); setTimeout(() => setAutoSaved(false), 1200); }, 350);
+    const t = setTimeout(() => { onAutoSave && onAutoSave(d); setAutoSaved(true); setTimeout(() => setAutoSaved(false), 1200); }, 150);
     return () => clearTimeout(t);
   }, [d]);
+
+  // 連続入力の途中でも1秒ごとに強制保存（相手端末が長時間"入力途中"の状態しか見えない事故を防ぐ）
+  const lastPushedRef = useRef(null);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const dd = dRef.current;
+      if (!dd || dd === lastPushedRef.current) return;
+      const empty = !dd.company && !dd.work && !dd.note && !dd.summary && !dd.received
+        && (!dd.tasks || dd.tasks.length === 0) && !dd.deadline && !dd.start && !dd.reward && !dd.replyUrl && !dd.replyDraft;
+      if (empty) return;
+      lastPushedRef.current = dd;
+      onAutoSave && onAutoSave(dd);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // どんな閉じ方（戻る・スワイプ・スクリム・Enter）でも、アンマウント時に最新を確実に保存（反映漏れ防止）
   const dRef = useRef(d);
