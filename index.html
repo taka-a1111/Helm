@@ -1210,6 +1210,13 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
           <Circle size={20} color={C.ink3} strokeWidth={2} />
         </button>
         <span style={S.cardCompany}>{p.company}</span>
+        {draggable && (
+          <span style={S.cardGrip} title="ドラッグして並び替え"
+            onPointerDown={(e) => { e.stopPropagation(); const card = e.currentTarget.closest("[data-pid]"); if (card && onDragHandle) onDragHandle(p.id, card, e.pointerId); }}
+            onClick={(e) => e.stopPropagation()}>
+            <GripVertical size={19} color={C.ink3} strokeWidth={2} />
+          </span>
+        )}
       </div>
 
       {(dl || st || Number(p.reward) > 0) && (
@@ -2786,7 +2793,7 @@ const S = {
   cardBar: { display: "none" },
   cardInner: { flex: 1, display: "flex", flexDirection: "column" },
   cardHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 9, minHeight: 20, justifyContent: "flex-end" },
-  cardGrip: { display: "inline-flex", alignItems: "center", justifyContent: "center", color: C.ink3, cursor: "grab", touchAction: "none", marginLeft: -4, marginRight: "auto", padding: "2px 2px" },
+  cardGrip: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "6px 2px", marginLeft: 4, touchAction: "none", cursor: "grab", color: C.ink3 },
   cardDragging: { opacity: 0.85, boxShadow: `0 0 0 2px ${C.accent}, 0 10px 24px rgba(0,0,0,0.45)`, cursor: "grabbing" },
   cardDragOther: { transition: "transform 0.12s ease" },
   cardStatus: { display: "none" },
