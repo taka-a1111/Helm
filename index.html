@@ -482,9 +482,12 @@ export default function App() {
       const remote = await gasGet(s);
       if (remote && remote.data && !dirtyRef.current) {
         const remoteReal = remote.data.some((p) => p && p.id !== INBOX_ID);
-        if (remote.rev > revRef.current && remoteReal) {
+        const remoteCount = remote.data.filter((p) => p && p.id !== INBOX_ID).length;
+        const localCount = projectsRef.current.filter((p) => p && p.id !== INBOX_ID).length;
+        const shrunk = !force && remoteCount + 1 < localCount; // サーバが2件以上少ない＝古い/壊れの疑い（巻き戻り防止）
+        if (remote.rev > revRef.current && remoteReal && !shrunk) {
           await adopt(remote.data, remote.rev); // サーバのrevが進んだ＝他端末が更新→取り込む
-        } else if (remote.rev !== revRef.current) {
+        } else if (remote.rev !== revRef.current && !shrunk) {
           revRef.current = remote.rev; saveMeta(); // revのみ同期（自分の保存が往復で変質しても取り込まない）
         }
       }
@@ -548,13 +551,14 @@ export default function App() {
     })();
   }, []);
 
-  // 他端末の変更は「アプリに戻ったとき」だけ取得（定期ポーリングは廃止＝編集中に勝手に戻らない）
+  // 他端末の変更を反映：アプリ復帰時＋15秒ごと（編集後15秒・保存中・rev・破損の各ガードで巻き戻りは防止）
   useEffect(() => {
     const onVis = () => { if (document.visibilityState === "visible") cloudPull(); };
     const onFocus = () => cloudPull();
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onFocus);
-    return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onFocus); };
+    const id = setInterval(() => { if (document.visibilityState === "visible") cloudPull(); }, 15000);
+    return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onFocus); clearInterval(id); };
   }, []);
 
   const persist = async (next) => {
@@ -1016,7 +1020,8 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
                     {dueItems.length > 0 && (
                       <span style={S.dueTaskList}>
                         {dueItems.map((it, idx) => (
-                          <span key={idx} style={S.dueTaskRow}>
+                          <span key={idx} style={{ ...S.dueTaskRow, ...(it.tid ? { cursor: "pointer" } : {}) }}
+                            onClick={it.tid ? (e) => { e.stopPropagation(); onEditTask && onEditTask(p.id, it.tid, "title"); } : undefined}>
                             {it.tid
                               ? <span onClick={(e) => { e.stopPropagation(); onToggleTask && onToggleTask(p.id, it.tid); }} style={S.dueTaskCheck} title="タスクを完了"><Circle size={16} color={C.ink3} strokeWidth={2} /></span>
                               : <span style={S.dueTaskCheck}>{it.isDeadline ? "📅" : ""}</span>}
@@ -2698,7 +2703,7 @@ const S = {
   replyPanelClose: { marginLeft: 4, border: "none", background: "transparent", color: C.ink3, display: "flex", padding: 2 },
   replyPanelEmpty: { fontSize: 14.5, color: C.ink3, padding: "6px 2px" },
   replyItem: { display: "flex", alignItems: "center", gap: 8, background: C.panel2, borderRadius: 10, padding: "9px 11px", minWidth: 0 },
-  replyItemMain: { flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8, border: "none", background: "transparent", padding: 0, textAlign: "left", overflow: "hidden" },
+  replyItemMain: { flex: 1, minWidth: 0, display: "flex", alignItems: "flex-start", gap: 8, border: "none", background: "transparent", padding: 0, textAlign: "left", overflow: "hidden" },
   replyItemCol: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 },
   replyItemSub: { fontSize: 14, color: C.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   replyItemMetaRow: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
@@ -2716,7 +2721,7 @@ const S = {
   dueTaskName: { flex: 1, minWidth: 0, fontSize: 15.5, color: C.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   dueTaskDays: { fontSize: 15.5, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap", flexShrink: 0 },
   replyItemName: { fontWeight: 700, fontSize: 16.5, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  replyItemCheck: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" },
+  replyItemCheck: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: 2 },
   replyItemLink: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.16)", padding: "6px 11px", borderRadius: 8, textDecoration: "none", flexShrink: 0, whiteSpace: "nowrap" },
 
   kpiRow: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 },
