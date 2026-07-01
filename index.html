@@ -32,6 +32,7 @@ window.storage = {
 <meta name="theme-color" content="#0F1318">
 <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
 <link rel="apple-touch-icon" href="/icon-192.png">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 </head>
 <body>
 <div id="root"><div id="boot">読み込み中…（初回はライブラリ取得のため数秒かかります）</div></div>
@@ -55,6 +56,7 @@ import {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
+const BUILD_TAG = "2026-07-01c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
 
 // ===== 端末間同期（GAS Web App + スプレッドシート） =====
@@ -183,8 +185,8 @@ const nextMonthly = (day, fromStr) => {
   return fmtYMD(occ);
 };
 // 返信タスク（当日期限）。msg はクライアントから届いた原文をそのまま保持
-const reply = (title, msg = "") => ({ id: uid(), title, done: false, due: dStr(0), lane: "today", kind: "reply", msg, note: "", repeat: null });
-const task = (title, offset, lane = "today", done = false) => ({ id: uid(), title, done, due: offset == null ? "" : dStr(offset), start: "", lane, kind: "task", note: "", repeat: null });
+const reply = (title, msg = "") => ({ id: uid(), title, done: false, due: dStr(0), lane: "today", kind: "reply", msg, note: "", repeat: null, links: [] });
+const task = (title, offset, lane = "today", done = false) => ({ id: uid(), title, done, due: offset == null ? "" : dStr(offset), start: "", lane, kind: "task", note: "", repeat: null, links: [] });
 
 function makeSample() {
   // 本番初期データ。Gmail（クラウドワークス通知）から確認できた進行中案件のみ骨組みで登録。
@@ -272,7 +274,7 @@ function normalizeProjects(arr) {
     start: p.start ?? "",
     received: p.received ?? "", replyDraft: p.replyDraft ?? "", repliedAt: p.repliedAt ?? null, replyUrl: p.replyUrl ?? "", replyHistory: p.replyHistory ?? [], summary: p.summary ?? "",
     links: (Array.isArray(p.links) ? p.links : []).filter((l) => l && (l.url || l.label)).map((l) => ({ id: l.id || uid(), label: l.label ?? "", url: l.url ?? "" })),
-    tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "", note: t.note ?? "", repeat: t.repeat ?? null })),
+    tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "", note: t.note ?? "", repeat: t.repeat ?? null, links: (Array.isArray(t.links) ? t.links : []).filter((l) => l && (l.url || l.label)).map((l) => ({ id: l.id || uid(), label: l.label ?? "", url: l.url ?? "" })) })),
   }));
   if (!list.some((p) => p.id === INBOX_ID)) list = [...list, makeInbox()];
   return list;
@@ -663,6 +665,7 @@ export default function App() {
       const localCount = projectsRef.current.filter((p) => p && p.id !== INBOX_ID).length;
       const lines = [];
       lines.push("✅ サーバに接続できました");
+      lines.push(`この端末のHelm版数：${BUILD_TAG}（PC・スマホで同じか確認）`);
       lines.push(hasRev ? `GAS：新バージョン（rev=${j.rev}）` : "⚠ GASが旧バージョンです。gas-sync.gs を全文置換し、デプロイを管理→新しいバージョンで再デプロイしてください。");
       lines.push(`サーバの案件数：${serverCount}件`);
       lines.push(`この端末の案件数：${localCount}件（ローカルrev=${revRef.current}）`);
@@ -733,7 +736,7 @@ export default function App() {
     }));
   const addTaskToLane = (pid, lane, title) =>
     persist(projects.map((p) => p.id !== pid ? p : {
-      ...p, tasks: [...p.tasks, { id: uid(), title, done: false, due: "", start: "", lane, kind: "task", note: "", repeat: null }],
+      ...p, tasks: [...p.tasks, { id: uid(), title, done: false, due: "", start: "", lane, kind: "task", note: "", repeat: null, links: [] }],
     }));
   const setDeadline = (pid, deadline) =>
     persist(projects.map((p) => p.id !== pid ? p : { ...p, deadline }));
@@ -1328,6 +1331,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
                 </button>
                 <span style={S.cardTaskTitle}>
                   {t.repeat && <Repeat size={13} color={C.accent} strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-2px" }} />}
+                  {(t.links || []).some((l) => l.url) && <Link2 size={13} color={C.accent} strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-2px" }} />}
                   {t.title || "（無題）"}
                 </span>
                 {lab && <span style={lab.overdue ? S.cardTaskOver : S.cardTaskDate}
@@ -1588,6 +1592,7 @@ function TaskCard({ t, lane, onToggle, onOpen, onOpenTask, onEditTask, dragging,
         <div style={{ ...S.tcardTitle, ...(t.done ? S.trowDone : {}) }}>
           {t.kind === "reply" && <Reply size={13} color="#6B8AFF" strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-1px" }} />}
           {t.repeat && <Repeat size={13} color={C.accent} strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-1px" }} />}
+          {(t.links || []).some((l) => l.url) && <Link2 size={13} color={C.accent} strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-1px" }} />}
           {t.title || "（無題）"}
         </div>
         {t.kind === "reply" && !t.done && (
@@ -1756,7 +1761,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
   const dismissAllDiff = () => { setPendingDiff([]); setParseMsg("反映をキャンセルしました。"); };
 
   const [justAddedId, setJustAddedId] = useState(null);
-  const addTask = () => { const id = uid(); set("tasks", [...d.tasks, { id, title: "", done: false, due: "", start: "", lane: "later", kind: "task", note: "", repeat: null }]); setJustAddedId(id); };
+  const addTask = () => { const id = uid(); set("tasks", [...d.tasks, { id, title: "", done: false, due: "", start: "", lane: "later", kind: "task", note: "", repeat: null, links: [] }]); setJustAddedId(id); };
   const setTask = (id, k, v) => set("tasks", d.tasks.map((t) => t.id === id ? { ...t, [k]: v } : t));
   const patchTask = (id, patch) => set("tasks", d.tasks.map((t) => t.id === id ? { ...t, ...patch } : t));
   const delTask = (id) => set("tasks", d.tasks.filter((t) => t.id !== id));
@@ -2111,6 +2116,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
                   <DateField value={t.due} placeholder="期限" onChange={(v) => setTask(t.id, "due", v)} />
                 </div>
                 <RepeatField value={t.repeat} onChange={(patch) => patchTask(t.id, patch)} />
+                <LinksField links={t.links} onChange={(v) => setTask(t.id, "links", v)} />
               </div>
             ))}
             <button style={S.taskAddRow} onClick={addTask}>
@@ -2291,6 +2297,19 @@ function SettingsModal({ onClose, sync, syncState, onSaveSync, onSyncPush, onSyn
           <button style={{ ...S.resetBtn, ...(resetting ? S.resetBtnConfirm : {}) }} onClick={resetSample}>
             {resetting ? "本当にリセットしますか？（もう一度タップ）" : "サンプルデータに戻す（リセット）"}
           </button>
+
+          <div style={S.settingDivider} />
+          <div style={S.settingNote}>
+            この端末で動いているHelmの版数：<b style={{ color: C.ink }}>{BUILD_TAG}</b><br />
+            PC・スマホで同じ版数か確認してください。違う場合は下のボタンで強制更新できます。
+          </div>
+          <button style={S.syncSubBtn} onClick={async () => {
+            try { if (typeof caches !== "undefined") { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } } catch {}
+            try { if (navigator.serviceWorker) { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map((r) => r.unregister())); } } catch {}
+            try { window.location.reload(true); } catch { window.location.reload(); }
+          }}>
+            <Download size={14} strokeWidth={2.3} />強制更新（キャッシュを消して再読み込み）
+          </button>
         </div>
       </div>
     </>
@@ -2464,6 +2483,10 @@ function SubtaskSheet({ project, task, focus, onClose, onUpdate, onToggle, onDel
           </div>
           <div style={S.infoRow}>
             <RepeatField value={task.repeat} onChange={(patch) => onUpdate(patch)} />
+          </div>
+          <div style={S.infoRow}>
+            <Link2 size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
+            <LinksField links={task.links} onChange={(v) => onUpdate({ links: v })} />
           </div>
           {project.id !== INBOX_ID && onStatusChange && (
             <div style={S.infoRow}>
