@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-02k"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-02m"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
 
 // ===== 端末間同期（GAS Web App + スプレッドシート） =====
@@ -2074,8 +2074,8 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
                   <DateField value={t.start} placeholder="いつやる" onChange={(v) => setTask(t.id, "start", v)} />
                   <span style={S.taskDateSep}>／</span>
                   <DateField value={t.due} placeholder="期限" onChange={(v) => setTask(t.id, "due", v)} />
+                  <RepeatField value={t.repeat} onChange={(patch) => patchTask(t.id, patch)} />
                 </div>
-                <RepeatField value={t.repeat} onChange={(patch) => patchTask(t.id, patch)} />
                 <LinksField links={t.links} onChange={(v) => setTask(t.id, "links", v)} />
               </div>
             ))}
@@ -2426,12 +2426,8 @@ function SubtaskSheet({ project, task, focus, onClose, onUpdate, onToggle, onDel
           <div style={S.infoRow}>
             <Clock size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
             <DateField value={task.start} placeholder="いつやる" onChange={(v) => onUpdate({ start: v })} autoOpen={focus === "date"} />
-          </div>
-          <div style={S.infoRow}>
-            <CalendarDays size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
+            <span style={S.taskDateSep}>／</span>
             <DateField value={task.due} placeholder="期限" onChange={(v) => onUpdate({ due: v })} />
-          </div>
-          <div style={S.infoRow}>
             <RepeatField value={task.repeat} onChange={(patch) => onUpdate(patch)} />
           </div>
           <div style={S.infoRow}>
@@ -2471,21 +2467,25 @@ function SubtaskSheet({ project, task, focus, onClose, onUpdate, onToggle, onDel
 }
 function RepeatField({ value, onChange }) {
   const setDay = (n) => { const day = Math.min(31, Math.max(1, Number(n) || 1)); onChange({ repeat: { freq: "monthly", day }, start: nextMonthly(day) }); };
+  if (!value) {
+    return (
+      <button style={S.repeatIconBtn} title="毎月くり返し"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={() => setDay(new Date(TODAY).getDate())}>
+        <Repeat size={15} color={C.ink3} strokeWidth={2.2} />
+      </button>
+    );
+  }
   return (
-    <div style={S.repeatRow} onPointerDown={(e) => e.stopPropagation()}>
-      <Repeat size={15} color={value ? C.accent : C.ink3} strokeWidth={2} style={{ flexShrink: 0 }} />
-      {!value ? (
-        <button style={S.repeatAdd} onClick={() => setDay(new Date(TODAY).getDate())}>毎月くり返し</button>
-      ) : (
-        <>
-          <span style={S.repeatLabel}>毎月</span>
-          <input type="number" min={1} max={31} value={value.day} style={S.repeatDayInput}
-            onChange={(e) => setDay(e.target.value)} />
-          <span style={S.repeatLabel}>日に表示</span>
-          <button style={S.repeatClear} onClick={() => onChange({ repeat: null })}><X size={13} /></button>
-        </>
-      )}
-    </div>
+    <span style={S.repeatCompact} onPointerDown={(e) => e.stopPropagation()}>
+      <Repeat size={14} color={C.accent} strokeWidth={2.4} />
+      <input type="number" min={1} max={31} value={value.day} style={S.repeatDayInputSmall}
+        onChange={(e) => setDay(e.target.value)} />
+      <span style={S.repeatCompactLabel}>日</span>
+      <button style={S.repeatClearSmall} onClick={() => onChange({ repeat: null })} title="繰り返しを解除">
+        <X size={11} strokeWidth={2.4} />
+      </button>
+    </span>
   );
 }
 function CalendarModal({ value, onChange, onClose }) {
@@ -2986,14 +2986,19 @@ function LinksField({ links, onChange }) {
           </div>
         );
       })}
-      <input
-        style={S.linkPasteInput}
-        placeholder="URLを貼り付け（複数OK。自動でラベル判定→確認して追加）"
-        value={pasteVal}
-        onChange={(e) => setPasteVal(e.target.value)}
-        onPaste={onPasteBulk}
-        onKeyDown={onKeyBulk}
-      />
+      <div style={S.linkPasteRow}>
+        <input
+          style={S.linkPasteInput}
+          placeholder="URLを貼り付け"
+          value={pasteVal}
+          onChange={(e) => setPasteVal(e.target.value)}
+          onPaste={onPasteBulk}
+          onKeyDown={onKeyBulk}
+        />
+        <button style={S.linkAddManualBtn} onClick={() => add("")} title="URL以外・手入力で追加">
+          <Plus size={16} strokeWidth={2.6} />
+        </button>
+      </div>
       {pending.length > 0 && (
         <div style={S.pendingLinkWrap}>
           {pending.map((p) => {
@@ -3030,9 +3035,6 @@ function LinksField({ links, onChange }) {
           )}
         </div>
       )}
-      <button style={S.linkAddManualBtn} onClick={() => add("")}>
-        <Plus size={13} strokeWidth={2.6} />URL以外・手入力で追加
-      </button>
       {editing && (
         <LinkEditModal
           key={editing.id}
@@ -3403,6 +3405,11 @@ const S = {
   repeatLabel: { fontSize: 14, color: C.ink2, fontWeight: 600 },
   repeatDayInput: { width: 46, textAlign: "center", background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 7, color: C.ink, fontSize: 14.5, fontWeight: 700, padding: "4px 4px" },
   repeatClear: { marginLeft: "auto", border: "none", background: "transparent", color: C.ink3, display: "inline-flex", padding: 2 },
+  repeatIconBtn: { flexShrink: 0, marginLeft: "auto", display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, border: `1px solid ${C.line}`, background: "transparent", borderRadius: 8, padding: 0, cursor: "pointer" },
+  repeatCompact: { flexShrink: 0, marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, background: C.accent + "15", border: `1px solid ${C.accent}44`, borderRadius: 8, padding: "3px 4px 3px 6px" },
+  repeatCompactLabel: { fontSize: 12, color: C.ink2, fontWeight: 600 },
+  repeatDayInputSmall: { width: 32, textAlign: "center", background: "transparent", border: "none", color: C.ink, fontSize: 13.5, fontWeight: 700, padding: 0, outline: "none" },
+  repeatClearSmall: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, border: "none", background: "transparent", color: C.ink3, borderRadius: 4, padding: 0, cursor: "pointer" },
   taskDate: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 8px", fontSize: 14, color: C.ink2, width: "100%" },
   taskRowOld_removed: { display: "none" },
 
@@ -3633,8 +3640,9 @@ const S = {
   linkDelMini: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 8, border: "none", background: "transparent", color: C.ink3 },
   linkPresetRow: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 },
   linkPresetBtn: { display: "inline-flex", alignItems: "center", gap: 3, border: `1px solid ${C.line}`, background: C.panel2, color: C.ink2, borderRadius: 8, padding: "5px 10px", fontSize: 13, fontWeight: 600 },
-  linkPasteInput: { width: "100%", boxSizing: "border-box", background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 8, color: C.ink, padding: "8px 12px", fontSize: 13.5, marginTop: 6, marginBottom: 6, outline: "none" },
-  linkAddManualBtn: { display: "inline-flex", alignItems: "center", gap: 4, border: `1px dashed ${C.line}`, background: "transparent", color: C.ink3, borderRadius: 8, padding: "4px 10px", fontSize: 12, fontWeight: 500, marginTop: 4, cursor: "pointer" },
+  linkPasteRow: { display: "flex", alignItems: "stretch", gap: 6, marginTop: 6, marginBottom: 6 },
+  linkPasteInput: { flex: 1, minWidth: 0, boxSizing: "border-box", background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 8, color: C.ink, padding: "8px 12px", fontSize: 13.5, outline: "none" },
+  linkAddManualBtn: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", width: 34, border: `1px solid ${C.line}`, background: C.panel2, color: C.ink2, borderRadius: 8, padding: 0, cursor: "pointer" },
   pendingLinkWrap: { display: "flex", flexDirection: "column", gap: 8, marginTop: 4, marginBottom: 4 },
   pendingLinkRow: { display: "flex", flexDirection: "column", gap: 4, background: C.panel2, border: `1px solid ${C.accent}55`, borderRadius: 10, padding: "10px 12px" },
   pendingLinkPrompt: { fontSize: 12.5, color: C.accent, fontWeight: 700 },
