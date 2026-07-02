@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-02p"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-02q"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
 
 // ===== 端末間同期（GAS Web App + スプレッドシート） =====
@@ -3496,9 +3496,9 @@ const S = {
   laneList: { display: "flex", flexDirection: "column", gap: 8 },
   laneEmpty: { border: "1.5px dashed #333B46", borderRadius: 10, padding: "14px 8px", textAlign: "center", fontSize: 14.5, color: C.ink3, fontWeight: 500 },
 
-  tcard: { display: "flex", alignItems: "flex-start", gap: 10, background: "transparent", border: "none", borderRadius: 0, padding: "6px 2px", cursor: "grab" },
+  tcard: { position: "relative", textAlign: "left", overflow: "hidden", display: "flex", alignItems: "flex-start", gap: 10, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px 14px", cursor: "pointer" },
   tcardDone: { opacity: 0.62, cursor: "default" },
-  tcardTitle: { fontSize: 16.5, fontWeight: 700, lineHeight: 1.4, color: C.ink, wordBreak: "break-word" },
+  tcardTitle: { fontSize: 17, fontFamily: F.disp, fontWeight: 800, lineHeight: 1.3, letterSpacing: 0.2, color: C.ink, wordBreak: "break-word" },
   tcardMeta: { display: "flex", alignItems: "center", gap: 7, marginTop: 6, flexWrap: "wrap" },
   tcardProject: { display: "flex", alignItems: "center", gap: 5, border: "none", background: "transparent", padding: 0, fontSize: 15.5, color: C.ink2, fontWeight: 600, minWidth: 0 },
   tcardCompany: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 220 },
