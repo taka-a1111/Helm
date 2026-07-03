@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-03o"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-03p"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
 
 // ===== 端末間同期（GAS Web App + スプレッドシート） =====
@@ -1067,12 +1067,15 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
       document.removeEventListener("pointermove", move);
       document.removeEventListener("pointerup", up);
       document.removeEventListener("pointercancel", up);
+      document.removeEventListener("touchmove", blockScroll);
       setDragTaskId(null);
       onReorderCommit && onReorderCommit();
       const swallow = (ce) => { ce.stopPropagation(); ce.preventDefault(); document.removeEventListener("click", swallow, true); };
       document.addEventListener("click", swallow, true);
       setTimeout(() => document.removeEventListener("click", swallow, true), 450);
     };
+    const blockScroll = (ev) => { if (ev.cancelable) ev.preventDefault(); };
+    document.addEventListener("touchmove", blockScroll, { passive: false });
     document.addEventListener("pointermove", move, { passive: false });
     document.addEventListener("pointerup", up);
     document.addEventListener("pointercancel", up);
@@ -1097,6 +1100,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
       document.removeEventListener("pointermove", move);
       document.removeEventListener("pointerup", up);
       document.removeEventListener("pointercancel", up);
+      document.removeEventListener("touchmove", blockScroll);
       setDragId(null);
       onReorderCommit && onReorderCommit();
       // ドラッグ直後の click を1回だけ無効化（詳細が開くのを防ぐ）
@@ -1104,6 +1108,8 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
       document.addEventListener("click", swallow, true);
       setTimeout(() => document.removeEventListener("click", swallow, true), 450);
     };
+    const blockScroll = (ev) => { if (ev.cancelable) ev.preventDefault(); };
+    document.addEventListener("touchmove", blockScroll, { passive: false });
     document.addEventListener("pointermove", move, { passive: false });
     document.addEventListener("pointerup", up);
     document.addEventListener("pointercancel", up);
@@ -1594,12 +1600,15 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
       document.removeEventListener("pointermove", move);
       document.removeEventListener("pointerup", up);
       document.removeEventListener("pointercancel", up);
+      document.removeEventListener("touchmove", blockScroll);
       setDragTid(null);
       onReorderCommit && onReorderCommit();
       const swallow = (ce) => { ce.stopPropagation(); ce.preventDefault(); document.removeEventListener("click", swallow, true); };
       document.addEventListener("click", swallow, true);
       setTimeout(() => document.removeEventListener("click", swallow, true), 450);
     };
+    const blockScroll = (ev) => { if (ev.cancelable) ev.preventDefault(); };
+    document.addEventListener("touchmove", blockScroll, { passive: false });
     document.addEventListener("pointermove", move, { passive: false });
     document.addEventListener("pointerup", up);
     document.addEventListener("pointercancel", up);
