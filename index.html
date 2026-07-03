@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-03r"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-03s"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
 
 // ===== 端末間同期（GAS Web App + スプレッドシート） =====
@@ -1043,11 +1043,13 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
   const [dragId, setDragId] = useState(null);
   const [dragTaskId, setDragTaskId] = useState(null);
   // タスク行の長押しドラッグ：行の上＝並べ替え／別案件カードの上＝その案件へ移動
-  const startTaskDrag = (pid, tid, el, pointerId) => {
+  const startTaskDrag = (pid, tid, el, pointerId, title, sx, sy) => {
     try { el && el.setPointerCapture && pointerId != null && el.setPointerCapture(pointerId); } catch {}
     setDragTaskId(tid);
+    const ghost = makeDragGhost(title, sx || 0, sy || 0);
     const move = (ev) => {
       if (ev.cancelable) ev.preventDefault();
+      moveDragGhost(ghost, ev.clientX, ev.clientY);
       const elAt = document.elementFromPoint(ev.clientX, ev.clientY);
       if (!elAt) return;
       const row = elAt.closest && elAt.closest("[data-tid]");
@@ -1068,6 +1070,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
       document.removeEventListener("pointerup", up);
       document.removeEventListener("pointercancel", up);
       document.removeEventListener("touchmove", blockScroll);
+      removeDragGhost(ghost);
       setDragTaskId(null);
       onReorderCommit && onReorderCommit();
       const swallow = (ce) => { ce.stopPropagation(); ce.preventDefault(); document.removeEventListener("click", swallow, true); };
@@ -1082,12 +1085,15 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
   };
   const wide = useWideScreen();
 
-  const startDrag = (pid, el, pointerId) => {
+  const startDrag = (pid, el, pointerId, sx, sy) => {
     try { el && el.setPointerCapture && pointerId != null && el.setPointerCapture(pointerId); } catch {}
     setSortMode("manual"); // 並べ替えたら手動順に切替（再ソートで戻らないように）
     setDragId(pid);
+    const src = projects.find((pp) => pp.id === pid);
+    const ghost = makeDragGhost(src ? src.company : "", sx || 0, sy || 0);
     const move = (ev) => {
       if (ev.cancelable) ev.preventDefault();
+      moveDragGhost(ghost, ev.clientX, ev.clientY);
       const x = ev.clientX, y = ev.clientY;
       const elAt = document.elementFromPoint(x, y);
       const card = elAt && elAt.closest && elAt.closest("[data-pid]");
@@ -1101,6 +1107,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
       document.removeEventListener("pointerup", up);
       document.removeEventListener("pointercancel", up);
       document.removeEventListener("touchmove", blockScroll);
+      removeDragGhost(ghost);
       setDragId(null);
       onReorderCommit && onReorderCommit();
       // ドラッグ直後の click を1回だけ無効化（詳細が開くのを防ぐ）
@@ -1399,8 +1406,11 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
     clearTimeout(tLp.current);
     tLp.current = setTimeout(() => {
       tLp.current = null;
-      if (tDown.current && onTaskDrag) onTaskDrag(p.id, tDown.current.tid, tDown.current.el, tDown.current.pointerId);
-    }, 300);
+      if (tDown.current && onTaskDrag) {
+        const tk = (p.tasks || []).find((x) => x.id === tDown.current.tid);
+        onTaskDrag(p.id, tDown.current.tid, tDown.current.el, tDown.current.pointerId, tk ? tk.title : "", tDown.current.x, tDown.current.y);
+      }
+    }, 180);
   };
   const tRowMove = (e) => { if (tLp.current && tDown.current && Math.hypot(e.clientX - tDown.current.x, e.clientY - tDown.current.y) > 10) { clearTimeout(tLp.current); tLp.current = null; } };
   const tRowUp = () => { if (tLp.current) { clearTimeout(tLp.current); tLp.current = null; } };
@@ -1432,8 +1442,8 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
     clearTimeout(lpTimer.current);
     lpTimer.current = setTimeout(() => {
       lpTimer.current = null;
-      if (downInfo.current) onDragHandle(p.id, downInfo.current.el, downInfo.current.pointerId);
-    }, 400);
+      if (downInfo.current) onDragHandle(p.id, downInfo.current.el, downInfo.current.pointerId, downInfo.current.x, downInfo.current.y);
+    }, 220);
   };
   const cardMove = (e) => {
     if (lpTimer.current && downInfo.current) {
@@ -1459,7 +1469,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
         </button>
         <span style={S.cardCompanyWrap}>
           <span style={{ ...S.cardCompany, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word" }}>{p.company || "（無題）"}</span>
-          {(st || dl) && (
+          {!dragActive && (st || dl) && (
             <span style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
               {st && (
                 <span style={{ ...S.cardDateInline, display: "inline-flex", alignItems: "center", gap: 5 }} title="いつやる">
@@ -1477,17 +1487,17 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
             </span>
           )}
         </span>
-        {replyN > 0 && (
+        {!dragActive && replyN > 0 && (
           <span style={S.cardReplyPill} title="要返信あり">
             <Reply size={11} strokeWidth={2.4} />{replyN}
           </span>
         )}
-        {Number(p.reward) > 0 && (
+        {!dragActive && Number(p.reward) > 0 && (
           <span style={S.cardRewardInline}>{yenMan(p.reward)}</span>
         )}
       </div>
 
-      {showTasks.length > 0 && (
+      {!dragActive && showTasks.length > 0 && (
         <div style={S.cardTaskList}>
           {showTasks.map((t) => (
             <div key={t.id} data-tid={t.id} data-pid={p.id}
@@ -1514,7 +1524,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
         </div>
       )}
 
-      {(li || (p.links || []).some((l) => l.url)) && (
+      {!dragActive && (li || (p.links || []).some((l) => l.url)) && (
         <div style={S.cardFoot}>
           {li && (
             <a href={p.replyUrl} target="_blank" rel="noopener noreferrer"
@@ -1540,6 +1550,25 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
    タスクビュー（横タブ・横スワイプ切替・ポインタD&D）
    ============================================================ */
 // フィルタキーごとの件数（チップ・PCボード共用）
+// ドラッグ中に指へ追従するゴースト（Googleタスク風）
+function makeDragGhost(text, x, y) {
+  const g = document.createElement("div");
+  g.textContent = text || "（無題）";
+  Object.assign(g.style, {
+    position: "fixed", left: "0px", top: "0px",
+    transform: `translate(${Math.round(x + 14)}px, ${Math.round(y - 26)}px)`,
+    zIndex: 9999, pointerEvents: "none",
+    background: "#212834", color: "#E8ECF2", border: "1px solid rgba(107,138,255,0.5)",
+    borderRadius: "10px", padding: "10px 14px", fontSize: "15px", fontWeight: "600",
+    maxWidth: "70vw", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.55)",
+  });
+  document.body.appendChild(g);
+  return g;
+}
+function moveDragGhost(g, x, y) { if (g) g.style.transform = `translate(${Math.round(x + 14)}px, ${Math.round(y - 26)}px)`; }
+function removeDragGhost(g) { if (g && g.parentNode) g.parentNode.removeChild(g); }
+
 function focusFilterCount(projects, key) {
   if (key === "all") return projects.filter((p) => p.id !== INBOX_ID && p.status !== "完了").length;
   if (key === "waiting" || key === "payment") {
@@ -1586,11 +1615,13 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
   });
 
   // 長押し→上下ドラッグでタスクを並べ替え（同一レーン内なら案件をまたいでも移動可）
-  const startTaskDrag = (pid, tid, el, pointerId, dragLane) => {
+  const startTaskDrag = (pid, tid, el, pointerId, dragLane, title, sx, sy) => {
     try { el && el.setPointerCapture && pointerId != null && el.setPointerCapture(pointerId); } catch {}
     setDragTid(tid);
+    const ghost = makeDragGhost(title, sx || 0, sy || 0);
     const move = (ev) => {
       if (ev.cancelable) ev.preventDefault();
+      moveDragGhost(ghost, ev.clientX, ev.clientY);
       const elAt = document.elementFromPoint(ev.clientX, ev.clientY);
       const row = elAt && elAt.closest && elAt.closest("[data-tid]");
       if (row) {
@@ -1606,6 +1637,7 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
       document.removeEventListener("pointerup", up);
       document.removeEventListener("pointercancel", up);
       document.removeEventListener("touchmove", blockScroll);
+      removeDragGhost(ghost);
       setDragTid(null);
       onReorderCommit && onReorderCommit();
       const swallow = (ce) => { ce.stopPropagation(); ce.preventDefault(); document.removeEventListener("click", swallow, true); };
@@ -1812,8 +1844,8 @@ function TaskCard({ t, lane, onToggle, onOpen, onOpenTask, onEditTask, dragging,
     if (e.target.closest && e.target.closest("button, input, a, label")) return; // 操作系は除外
     downInfo.current = { el: e.currentTarget, pointerId: e.pointerId, x: e.clientX, y: e.clientY };
     lpTimer.current = setTimeout(() => {
-      if (downInfo.current && onStartDrag) onStartDrag(t.project.id, t.id, downInfo.current.el, downInfo.current.pointerId, lane);
-    }, 300);
+      if (downInfo.current && onStartDrag) onStartDrag(t.project.id, t.id, downInfo.current.el, downInfo.current.pointerId, lane, t.title, downInfo.current.x, downInfo.current.y);
+    }, 180);
   };
   const tmove = (e) => {
     if (!downInfo.current || !lpTimer.current) return;
@@ -3360,6 +3392,7 @@ function Fonts() {
     select option { background: #212834; color: #E8ECF2; }
     ::-webkit-scrollbar { width: 9px; height: 9px; }
     ::-webkit-scrollbar-thumb { background: #333B46; border-radius: 6px; }
+    * { -webkit-tap-highlight-color: transparent; }
     @keyframes spin { to { transform: rotate(360deg); } }
     @keyframes helm-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
   `}</style>);
