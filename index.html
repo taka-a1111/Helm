@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-03j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-03l"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
 
 // ===== 端末間同期（GAS Web App + スプレッドシート） =====
@@ -951,10 +951,25 @@ export default function App() {
       </header>
 
       {/* ===== Body ===== */}
-      <main style={S.main} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
-        {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
-        {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} sortMode={sortMode} setSortMode={setSortMode} />}
-        {view === "focus" && focusFilter !== "all" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} activeLane={focusFilter} setActiveLane={setFocusFilter} />}
+      <main style={{ ...S.main, ...(wide && view === "focus" ? S.mainWide : {}) }} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
+        {view === "focus" && !wide && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
+        {view === "focus" && wide && (
+          <div style={S.focusBoard}>
+            {FOCUS_FILTERS.map((f) => (
+              <div key={f.key} style={S.focusBoardCol}>
+                <div style={S.focusBoardHead}>
+                  <span>{f.label}</span>
+                  <span style={S.focusBoardCount}>{focusFilterCount(projects, f.key)}</span>
+                </div>
+                {f.key === "all"
+                  ? <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} sortMode={sortMode} setSortMode={setSortMode} />
+                  : <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} activeLane={f.key} setActiveLane={() => {}} />}
+              </div>
+            ))}
+          </div>
+        )}
+        {view === "focus" && !wide && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} sortMode={sortMode} setSortMode={setSortMode} />}
+        {view === "focus" && !wide && focusFilter !== "all" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} activeLane={focusFilter} setActiveLane={setFocusFilter} />}
         {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
       </main>
 
@@ -1479,24 +1494,25 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
 /* ============================================================
    タスクビュー（横タブ・横スワイプ切替・ポインタD&D）
    ============================================================ */
+// フィルタキーごとの件数（チップ・PCボード共用）
+function focusFilterCount(projects, key) {
+  if (key === "all") return projects.filter((p) => p.id !== INBOX_ID && p.status !== "完了").length;
+  if (key === "waiting" || key === "payment") {
+    const st = key === "waiting" ? "相手待ち" : "支払い待ち";
+    let c = 0;
+    projects.forEach((p) => {
+      if (p.id === INBOX_ID || p.status !== st) return;
+      const n = (p.tasks || []).filter((t) => !t.done).length;
+      c += n > 0 ? n : 1;
+    });
+    return c;
+  }
+  let c = 0;
+  projects.forEach((p) => (p.tasks || []).forEach((t) => { if (!t.done && laneOf(p, t) === key) c++; }));
+  return c;
+}
 // 案件一覧上部のフィルタチップ（件数付き）
 function FilterChips({ projects, filter, onChange }) {
-  const countOf = (key) => {
-    if (key === "all") return projects.filter((p) => p.id !== INBOX_ID && p.status !== "完了").length;
-    if (key === "waiting" || key === "payment") {
-      const st = key === "waiting" ? "相手待ち" : "支払い待ち";
-      let c = 0;
-      projects.forEach((p) => {
-        if (p.id === INBOX_ID || p.status !== st) return;
-        const n = (p.tasks || []).filter((t) => !t.done).length;
-        c += n > 0 ? n : 1;
-      });
-      return c;
-    }
-    let c = 0;
-    projects.forEach((p) => (p.tasks || []).forEach((t) => { if (!t.done && laneOf(p, t) === key) c++; }));
-    return c;
-  };
   return (
     <div style={S.filterChips}>
       {FOCUS_FILTERS.map((f) => {
@@ -1505,7 +1521,7 @@ function FilterChips({ projects, filter, onChange }) {
           <button key={f.key} onClick={() => onChange(f.key)}
             style={{ ...S.filterChip, ...(on ? S.filterChipOn : {}) }}>
             {f.label}
-            <span style={{ ...S.filterChipCount, ...(on ? { color: C.accent } : {}) }}>{countOf(f.key)}</span>
+            <span style={{ ...S.filterChipCount, ...(on ? { color: C.accent } : {}) }}>{focusFilterCount(projects, f.key)}</span>
           </button>
         );
       })}
@@ -3130,7 +3146,7 @@ function MarqueeText({ text, style, gap = 40, seconds = 10 }) {
     );
   }
   return (
-    <span ref={wrapRef} style={{ ...style, display: "block", overflow: "hidden", whiteSpace: "nowrap", position: "relative" }}>
+    <span ref={wrapRef} style={{ ...style, display: "block", overflow: "hidden", whiteSpace: "nowrap", position: "relative", transform: "translateZ(0)", contain: "layout paint" }}>
       <span style={{ display: "inline-block", animation: `helm-marquee ${seconds}s linear infinite`, willChange: "transform" }}>
         <span ref={measureRef} style={{ display: "inline-block", paddingRight: gap }}>{text}</span>
         <span aria-hidden="true" style={{ display: "inline-block", paddingRight: gap }}>{text}</span>
@@ -3337,7 +3353,7 @@ const S = {
 
   header: {
     position: "sticky", top: 0, zIndex: 20, display: "flex", alignItems: "center", gap: 9,
-    padding: "10px 14px", background: "rgba(15,19,24,0.82)", backdropFilter: "blur(10px)",
+    padding: "10px 14px", background: "rgba(15,19,24,0.97)",
     borderBottom: `1px solid ${C.line}`, flexWrap: "nowrap",
   },
   brand: { display: "flex", alignItems: "center", gap: 10, marginRight: "auto", flexShrink: 0 },
@@ -3377,7 +3393,7 @@ const S = {
   },
   addLabel: {},
 
-  main: { padding: "10px 16px 64px", maxWidth: 1120, margin: "0 auto" },
+  main: { padding: "10px 16px 64px", maxWidth: 1120, margin: "0 auto", overflowAnchor: "none" },
   mainWide: { maxWidth: "none", paddingLeft: 24, paddingRight: 24 },
   viewDots: { display: "flex", justifyContent: "center", gap: 7, marginBottom: 14 },
   focusFilterBar: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 },
@@ -3719,6 +3735,10 @@ const S = {
   filterChip: { flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, background: "transparent", borderRadius: 999, padding: "7px 14px", fontSize: 14, fontWeight: 600, color: C.ink2, whiteSpace: "nowrap", cursor: "pointer" },
   filterChipOn: { borderColor: C.accent + "66", background: C.panel2, color: C.ink },
   filterChipCount: { fontSize: 12, fontWeight: 700, color: C.ink3 },
+  focusBoard: { display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, alignItems: "start" },
+  focusBoardCol: { background: "rgba(255,255,255,0.015)", border: `1px solid ${C.line}`, borderRadius: 14, padding: 10, minWidth: 0 },
+  focusBoardHead: { display: "flex", alignItems: "center", gap: 8, padding: "2px 4px 10px", fontFamily: F.disp, fontWeight: 800, fontSize: 15.5, color: C.ink },
+  focusBoardCount: { fontSize: 12.5, fontWeight: 700, color: C.ink3 },
   focusGroupBar: { display: "flex", alignItems: "center", gap: 8, padding: "8px 13px", borderRadius: 10, fontSize: 14, fontWeight: 800, fontFamily: F.disp, letterSpacing: 0.3, marginTop: 4 },
   focusGroupCount: { fontSize: 12, fontWeight: 700, color: C.ink3 },
   taskTab: { position: "relative", display: "flex", alignItems: "center", gap: 7, flexShrink: 0, border: `1px solid ${C.line}`, background: C.panel2, padding: "9px 14px", fontSize: 14, fontWeight: 700, color: C.ink2, whiteSpace: "nowrap", borderRadius: 10 },
