@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-03t"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-03u"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
 
 // ===== 端末間同期（GAS Web App + スプレッドシート） =====
@@ -154,8 +154,8 @@ function makeInbox() {
 const REPLY_META = {
   "要返信":   { color: "#6B8AFF", bg: "rgba(107,138,255,0.15)", label: "要返信" },
   "返信済み": { color: "#51CF66", bg: "rgba(81,207,102,0.15)", label: "返信済み" },
-  "相手待ち": { color: "#C0C9D6", bg: "#212834", label: "相手待ち" },
-  "なし":     { color: "#8B95A5", bg: "#212834", label: "—" },
+  "相手待ち": { color: "#C0C9D6", bg: "#14171C", label: "相手待ち" },
+  "なし":     { color: "#8B95A5", bg: "#14171C", label: "—" },
 };
 const STATUS_META = {
   "進行中":   "#C0C9D6",
@@ -1567,7 +1567,7 @@ function makeRowGhost(el, startY, textOverride) {
   Object.assign(g.style, {
     position: "fixed", left: r.left + "px", top: r.top + "px", width: r.width + "px",
     margin: "0", zIndex: "9999", pointerEvents: "none", boxSizing: "border-box",
-    background: "#181D25", border: "1px solid rgba(107,138,255,0.45)", borderRadius: "12px",
+    background: "#000000", border: "1px solid rgba(107,138,255,0.45)", borderRadius: "12px",
     boxShadow: "0 10px 28px rgba(0,0,0,0.6)",
   });
   g.dataset.gy = String(startY || 0);
@@ -3395,9 +3395,9 @@ function Fonts() {
     * { box-sizing: border-box; }
     body { color: #E8ECF2; }
     button { cursor: pointer; font-family: inherit; }
-    input, select, textarea { font-family: inherit; outline: none; color: #E8ECF2; background: #212834; }
+    input, select, textarea { font-family: inherit; outline: none; color: #E8ECF2; background: #14171C; }
     input::placeholder, textarea::placeholder { color: #8B95A5; }
-    select option { background: #212834; color: #E8ECF2; }
+    select option { background: #14171C; color: #E8ECF2; }
     ::-webkit-scrollbar { width: 9px; height: 9px; }
     ::-webkit-scrollbar-thumb { background: #333B46; border-radius: 6px; }
     * { -webkit-tap-highlight-color: transparent; }
@@ -3414,7 +3414,7 @@ const F = {
   body: "'Noto Sans JP', system-ui, sans-serif",
 };
 const C = {
-  bg: "#000000", panel: "#181D25", panel2: "#212834",
+  bg: "#000000", panel: "#000000", panel2: "#14171C",
   ink: "#E8ECF2", ink2: "#C0C9D6", ink3: "#8B95A5",
   line: "#2A323D", accent: "#6B8AFF",
 };
@@ -3824,7 +3824,7 @@ const S = {
   laneBarTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 15.5, marginRight: "auto" },
   laneBarAdd: { display: "flex", alignItems: "center", gap: 4, border: `1px solid ${C.line}`, background: C.panel, borderRadius: 9, padding: "7px 12px", fontSize: 14.5, fontWeight: 700, color: C.ink },
 
-  lane: { background: "#1B212A", border: "1.5px solid #2A323D", borderRadius: 14, padding: 11, display: "flex", flexDirection: "column", gap: 9, minHeight: 140, transition: "background 0.12s, border-color 0.12s" },
+  lane: { background: "#000000", border: "1.5px solid #2A323D", borderRadius: 14, padding: 11, display: "flex", flexDirection: "column", gap: 9, minHeight: 140, transition: "background 0.12s, border-color 0.12s" },
   laneHead: { display: "flex", alignItems: "center", gap: 7 },
   laneDot: { width: 9, height: 9, borderRadius: "50%", flexShrink: 0 },
   laneTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 14, color: C.ink },
