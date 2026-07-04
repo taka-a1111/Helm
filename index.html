@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-04a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-04b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
 
 // ===== 端末間同期（GAS Web App + スプレッドシート） =====
@@ -1091,9 +1091,26 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
     setDragId(pid);
     const srcP = projects.find((pp) => pp.id === pid);
     const ghost = makeRowGhost(el, sy || 0, srcP ? srcP.company : "");
+    // 折りたたみでリストが縮み、指の下に別カードが来て即入れ替わるのを防ぐ：
+    // 描画後、つかんだカードが指の真下に来るようスクロール補正してから並べ替えを許可する
+    let ready = false;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      try {
+        const cardEl = document.querySelector(`[data-pid="${pid}"]`);
+        if (cardEl && sy) {
+          const r = cardEl.getBoundingClientRect();
+          const delta = (r.top + r.height / 2) - sy;
+          if (Math.abs(delta) > 4) window.scrollBy(0, delta);
+          const r2 = cardEl.getBoundingClientRect();
+          if (ghost) { ghost.style.top = r2.top + "px"; ghost.style.height = r2.height + "px"; }
+        }
+      } catch {}
+      ready = true;
+    }));
     const move = (ev) => {
       if (ev.cancelable) ev.preventDefault();
       moveRowGhost(ghost, ev.clientY);
+      if (!ready) return;
       const x = ev.clientX, y = ev.clientY;
       const elAt = document.elementFromPoint(x, y);
       const card = elAt && elAt.closest && elAt.closest("[data-pid]");
