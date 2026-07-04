@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-03x"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-04a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
 
 // ===== 端末間同期（GAS Web App + スプレッドシート） =====
@@ -3797,9 +3797,9 @@ const S = {
 
   /* task tabs (Googleタスク風) */
   taskTabs: { display: "flex", gap: 7, overflowX: "auto", marginBottom: 14, paddingBottom: 2 },
-  filterChips: { display: "flex", gap: 7, overflowX: "auto", width: "100%", maxWidth: 720, margin: "0 auto 14px", paddingBottom: 2 },
-  filterChip: { flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, background: "transparent", borderRadius: 999, padding: "7px 14px", fontSize: 14, fontWeight: 600, color: C.ink2, whiteSpace: "nowrap", cursor: "pointer" },
-  filterChipOn: { borderColor: C.accent + "66", background: C.panel2, color: C.ink },
+  filterChips: { display: "flex", gap: 2, overflowX: "auto", width: "100%", maxWidth: 720, margin: "0 auto 12px", borderBottom: `1px solid ${C.line}` },
+  filterChip: { flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderBottom: "3px solid transparent", background: "transparent", padding: "9px 13px 10px", fontSize: 15, fontWeight: 700, color: C.ink3, whiteSpace: "nowrap", cursor: "pointer", borderRadius: 0 },
+  filterChipOn: { color: C.ink, borderBottom: `3px solid ${C.accent}` },
   filterChipCount: { fontSize: 12, fontWeight: 700, color: C.ink3 },
   focusBoard: { display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, alignItems: "start" },
   focusBoardCol: { background: "rgba(255,255,255,0.015)", border: `1px solid ${C.line}`, borderRadius: 14, padding: 10, minWidth: 0 },
@@ -3903,7 +3903,7 @@ const S = {
   resetBtnConfirm: { border: "1px solid rgba(255,107,107,0.5)", background: "rgba(255,107,107,0.13)", color: "#FF6B6B" },
 
   /* task group */
-  taskGroup: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px 14px", marginBottom: 12 },
+  taskGroup: { background: C.panel, borderRadius: 12, padding: "12px 14px", marginBottom: 12 },
   taskGroupHead: { display: "flex", alignItems: "center", gap: 9, border: "none", background: "transparent", padding: 0, width: "100%", textAlign: "left" },
   taskGroupTasks: { display: "flex", flexDirection: "column", gap: 4, marginTop: 10, paddingTop: 9, paddingLeft: 30, borderTop: `1px solid ${C.line}` },
   doneAccordion: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "transparent", color: C.ink2, padding: "10px 4px", fontSize: 13.5, fontWeight: 700, textAlign: "left", cursor: "pointer", width: "100%", marginTop: 4 },
