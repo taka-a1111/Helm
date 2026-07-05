@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-05d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-05e"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1491,7 +1491,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
         </button>
         <span style={S.cardCompanyWrap}>
           <span style={{ ...S.cardCompany, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word" }}>{p.company || "（無題）"}</span>
-          {!dragActive && (st || dl || li || (p.links || []).some((l) => l.url)) && (
+          {!dragActive && (st || dl) && (
             <span style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
               {st && (
                 <span style={{ ...S.cardDateInline, display: "inline-flex", alignItems: "center", gap: 5 }} title="いつやる">
@@ -1506,18 +1506,6 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
                   <Flag size={13} strokeWidth={2.2} />{dl.text}
                 </span>
               )}
-              {li && (
-                <a href={p.replyUrl} target="_blank" rel="noopener noreferrer" style={S.cardLinkMini}
-                  onPointerDown={stop} onClick={stop} title={li.label}>
-                  <Favicon url={p.replyUrl} size={20} />
-                </a>
-              )}
-              {(p.links || []).filter((l) => l.url).map((l) => (
-                <a key={l.id} href={l.url} target="_blank" rel="noopener noreferrer" style={S.cardLinkMini}
-                  onPointerDown={stop} onClick={stop} title={linkLabelOf(l)}>
-                  <Favicon url={l.url} size={20} />
-                </a>
-              ))}
             </span>
           )}
         </span>
