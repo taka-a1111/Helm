@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-05q"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-05r"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -969,25 +969,10 @@ export default function App() {
       </header>
 
       {/* ===== Body ===== */}
-      <main style={{ ...S.main, ...(wide && view === "focus" ? S.mainWide : {}) }} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
-        {view === "focus" && !wide && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
-        {view === "focus" && wide && (
-          <div style={S.focusBoard}>
-            {FOCUS_FILTERS.map((f) => (
-              <div key={f.key} style={S.focusBoardCol}>
-                <div style={S.focusBoardHead}>
-                  <span>{f.label}</span>
-                  <span style={S.focusBoardCount}>{focusFilterCount(projects, f.key)}</span>
-                </div>
-                {f.key === "all"
-                  ? <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} />
-                  : <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} activeLane={f.key} setActiveLane={() => {}} />}
-              </div>
-            ))}
-          </div>
-        )}
-        {view === "focus" && !wide && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} />}
-        {view === "focus" && !wide && focusFilter !== "all" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} activeLane={focusFilter} setActiveLane={setFocusFilter} />}
+      <main style={S.main} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
+        {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
+        {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} />}
+        {view === "focus" && focusFilter !== "all" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} activeLane={focusFilter} setActiveLane={setFocusFilter} />}
         {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
       </main>
 
@@ -1177,6 +1162,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
 
   return (
     <div style={S.colWrap}>
+      {wide && <InboxPanel />}
       <div style={{ display: "contents" }}>
       {!wide && (
       <div style={S.kpiRow}>
@@ -1300,21 +1286,39 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
         <div style={S.swipeArea}>
           {cardList.length > 0 && (
             <div style={S.grid}>
-              {FOCUS_STATUSES.map(({ key: status, color }) => {
-                const items = cardList.filter((p) => p.status === status);
-                if (items.length === 0) return null;
-                return (
-                  <React.Fragment key={status}>
-                    {status !== "進行中" && (
-                      <div style={{ ...S.focusGroupBar, background: color + "1A", border: `1px solid ${color}33`, color }}>
-                        <span>{status}</span>
-                        <span style={{ ...S.focusGroupCount, color }}>{items.length}</span>
-                      </div>
-                    )}
-                    {items.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onUpdateTask={onUpdateTask} onEditTask={onEditTask} onToggleTask={onToggleTask} onToggleProject={onToggleProject} onDragHandle={startDrag} dragging={dragId === p.id} dragActive={dragId !== null} onTaskDrag={startTaskDrag} taskDragId={dragTaskId} />)}
-                  </React.Fragment>
-                );
-              })}
+              {(() => {
+                // PCの「すべて」は 今日/明日以降/相手待ち/支払い待ち を色バーで区切る。スマホは従来通り（相手待ち/支払い待ちのみバー）
+                const openT = (p) => (p.tasks || []).filter((t) => !t.done && !isArchivedTask(t));
+                const isTodayP = (p) => {
+                  const ts = openT(p);
+                  if (ts.some((t) => laneOf(p, t) === "today")) return true;
+                  if (ts.length === 0) { const n = daysUntil(p.start); if (n !== null && n <= 0) return true; }
+                  return false;
+                };
+                const prog = cardList.filter((p) => p.status === "進行中");
+                const groups = wide
+                  ? [
+                      { key: "today",   label: "今日",       color: "#6B8AFF", items: prog.filter(isTodayP), bar: true },
+                      { key: "later",   label: "明日以降",   color: "#9AA4B2", items: prog.filter((p) => !isTodayP(p)), bar: true },
+                      { key: "waiting", label: "相手待ち",   color: "#D9A23B", items: cardList.filter((p) => p.status === "相手待ち"), bar: true },
+                      { key: "payment", label: "支払い待ち", color: "#51CF66", items: cardList.filter((p) => p.status === "支払い待ち"), bar: true },
+                    ]
+                  : FOCUS_STATUSES.map(({ key, color }) => ({ key, label: key, color, items: cardList.filter((p) => p.status === key), bar: key !== "進行中" }));
+                return groups.map((g) => {
+                  if (g.items.length === 0) return null;
+                  return (
+                    <React.Fragment key={g.key}>
+                      {g.bar && (
+                        <div style={{ ...S.focusGroupBar, background: g.color + "1A", border: `1px solid ${g.color}33`, color: g.color }}>
+                          <span>{g.label}</span>
+                          <span style={{ ...S.focusGroupCount, color: g.color }}>{g.items.length}</span>
+                        </div>
+                      )}
+                      {g.items.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onUpdateTask={onUpdateTask} onEditTask={onEditTask} onToggleTask={onToggleTask} onToggleProject={onToggleProject} onDragHandle={startDrag} dragging={dragId === p.id} dragActive={dragId !== null} onTaskDrag={startTaskDrag} taskDragId={dragTaskId} />)}
+                    </React.Fragment>
+                  );
+                });
+              })()}
             </div>
           )}
         </div>
@@ -1958,7 +1962,6 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
       </div>
       )}
 
-      {!(singleLane && wide) && (
       <div style={S.laneBar}>
         {!singleLane && <span style={{ ...S.laneDot, background: activeMeta.color }} />}
         {!singleLane && <span style={S.laneBarTitle}>{activeMeta.label}</span>}
@@ -1967,7 +1970,6 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
           <Plus size={15} strokeWidth={2.6} /> 追加
         </button>
       </div>
-      )}
 
       {adding && (
         <AddTaskInline projects={projects}
