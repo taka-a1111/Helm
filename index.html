@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-04d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-04e"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
 
 // ===== 端末間同期（GAS Web App + スプレッドシート） =====
@@ -2672,6 +2672,15 @@ function SubtaskSheet({ project, task, focus, onClose, onUpdate, onToggle, onDel
       <aside style={wide ? S.taskDrawer : S.taskSheet}>
         <div style={S.taskSheetHead}>
           <span style={S.taskSheetProject}>{project.company}</span>
+          {confirm ? (
+            <>
+              <span style={S.delText}>削除しますか？</span>
+              <button style={S.delYes} onClick={onDelete}>削除</button>
+              <button style={S.delNo} onClick={() => setConfirm(false)}>戻る</button>
+            </>
+          ) : (
+            <button style={S.iconBtn} onClick={() => setConfirm(true)} title="タスクを削除"><Trash2 size={17} /></button>
+          )}
           <button style={S.iconBtn} onClick={onClose}><X size={18} /></button>
         </div>
         <div style={{ ...S.taskSheetBody, flex: 1 }}>
@@ -2703,23 +2712,6 @@ function SubtaskSheet({ project, task, focus, onClose, onUpdate, onToggle, onDel
                 {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
-          )}
-        </div>
-        <div style={S.taskSheetFoot}>
-          {confirm ? (
-            <div style={S.delConfirm}>
-              <span style={S.delText}>削除しますか？</span>
-              <button style={S.delYes} onClick={onDelete}>削除</button>
-              <button style={S.delNo} onClick={() => setConfirm(false)}>戻る</button>
-            </div>
-          ) : (
-            <>
-              <button style={S.delBtn} onClick={() => setConfirm(true)}><Trash2 size={15} />削除</button>
-              <div style={{ flex: 1 }} />
-              <button style={S.taskDoneBtn} onClick={onToggle}>
-                <CheckCircle2 size={16} strokeWidth={2.4} />{task.done ? "未完了に戻す" : "完了にする"}
-              </button>
-            </>
           )}
         </div>
       </aside>
