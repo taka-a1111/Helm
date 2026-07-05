@@ -69,7 +69,12 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-04e"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-05a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+
+// ==================== Chatwork自動対応システム（対応待ちパネル） ====================
+// ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
+const AGENT_GAS_URL = "https://script.google.com/macros/s/AKfycbyIMxJlaI626Rh4M2LSM0o63VSAGp8rKtWB_gzt0wvTD_6GnZdbX75okpXqPkrcvtmt/exec";
+const AGENT_TOKEN   = "973b2ec9a7d44575b09ed3c127a61aec";
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
 
 // ===== 端末間同期（GAS Web App + スプレッドシート） =====
@@ -1621,6 +1626,145 @@ function FilterChips({ projects, filter, onChange }) {
   );
 }
 
+// ============================================================
+// InboxPanel — Chatwork自動対応システムの「対応待ち」パネル
+// AGENT_GAS_URL 未設定（httpsで始まらない）の間は何も表示しない。
+// ============================================================
+function InboxPanel() {
+  const [items, setItems] = React.useState(null);   // null=読み込み中
+  const [dashUrl, setDashUrl] = React.useState('');
+  const [error, setError] = React.useState('');
+  const [openId, setOpenId] = React.useState(null); // 編集展開中のカード
+  const [drafts, setDrafts] = React.useState({});   // id -> 編集中本文
+  const [sending, setSending] = React.useState({}); // id -> true
+  const configured = /^https:\/\//.test(AGENT_GAS_URL);
+
+  const load = React.useCallback(async () => {
+    if (!configured) return;
+    try {
+      const res = await fetch(`${AGENT_GAS_URL}?action=list&t=${encodeURIComponent(AGENT_TOKEN)}`);
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'error');
+      setItems(data.items);
+      setDashUrl(data.dash || '');
+      setError('');
+    } catch (e) {
+      setError(String(e.message || e));
+      setItems([]);
+    }
+  }, [configured]);
+
+  React.useEffect(() => {
+    if (!configured) return;
+    load();
+    const onVis = () => { if (!document.hidden) load(); };
+    document.addEventListener('visibilitychange', onVis);
+    const timer = setInterval(load, 5 * 60 * 1000); // 5分ごとに再取得
+    return () => { document.removeEventListener('visibilitychange', onVis); clearInterval(timer); };
+  }, [load, configured]);
+
+  const send = async (it) => {
+    setSending(s => ({ ...s, [it.id]: true }));
+    try {
+      const body = drafts[it.id] != null ? drafts[it.id] : it.draft;
+      const res = await fetch(AGENT_GAS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action: 'send', t: AGENT_TOKEN, id: it.id, body }),
+      });
+      const r = await res.json();
+      if (!r.ok) throw new Error(r.error || 'error');
+      setItems(list => list.filter(x => x.id !== it.id));
+      setOpenId(null);
+    } catch (e) {
+      alert('送信に失敗: ' + e.message);
+    } finally {
+      setSending(s => ({ ...s, [it.id]: false }));
+    }
+  };
+
+  const copy = (it) => {
+    const text = drafts[it.id] != null ? drafts[it.id] : it.draft;
+    navigator.clipboard.writeText(text);
+  };
+
+  const fmt = (ms) => {
+    if (!ms) return '';
+    const d = new Date(ms);
+    return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+
+  if (!configured) return null;
+
+  return (
+    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16, color: C.ink, marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div style={{ fontSize: 15, fontWeight: 600 }}>
+          📥 対応待ち {items && items.length > 0 ? `（${items.length}）` : ''}
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {dashUrl && (
+            <a href={dashUrl} target="_blank" rel="noreferrer" style={{ color: C.ink2, fontSize: 12.5, textDecoration: 'none' }}>📊 台帳</a>
+          )}
+          <button onClick={load} style={{ background: 'none', border: 'none', color: C.ink2, fontSize: 12.5, cursor: 'pointer' }}>↻ 更新</button>
+        </div>
+      </div>
+
+      {items === null && <div style={{ color: C.ink3, fontSize: 13, padding: '14px 0' }}>読み込み中…</div>}
+      {error && <div style={{ color: C.ink3, fontSize: 13, padding: '14px 0' }}>取得に失敗しました：{error}</div>}
+      {items && items.length === 0 && !error && (
+        <div style={{ color: C.ink3, fontSize: 13.5, padding: '18px 0', textAlign: 'center' }}>🎉 未処理はありません</div>
+      )}
+
+      {items && items.map(it => (
+        <div key={it.id} style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 10, padding: 12, marginBottom: 8 }}>
+          <div style={{ fontSize: 13.5 }}>
+            <b>{it.client_name}</b>
+            <span style={{ color: C.ink2 }}>｜{it.room_name}{it.category ? `｜${it.category}` : ''}</span>
+            <span style={{ float: 'right', color: C.ink3, fontSize: 12 }}>{fmt(it.created)}</span>
+          </div>
+          {it.summary && <div style={{ fontSize: 13, color: C.ink2, margin: '6px 0 2px' }}>{it.summary}</div>}
+
+          {openId === it.id && (
+            <textarea
+              value={drafts[it.id] != null ? drafts[it.id] : it.draft}
+              onChange={e => setDrafts(d => ({ ...d, [it.id]: e.target.value }))}
+              rows={10}
+              style={{
+                width: '100%', boxSizing: 'border-box', marginTop: 8, padding: 10,
+                background: C.bg, color: C.ink, border: `1px solid ${C.line}`,
+                borderRadius: 8, fontSize: 13.5, lineHeight: 1.7, fontFamily: 'inherit',
+              }}
+            />
+          )}
+
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            {openId !== it.id ? (
+              <button onClick={() => setOpenId(it.id)}
+                style={{ flex: 1, padding: '9px 4px', borderRadius: 8, border: 'none', background: C.accent, color: C.bg, fontWeight: 600, fontSize: 12.5, cursor: 'pointer' }}>
+                ✅ 確認して送信
+              </button>
+            ) : (
+              <button onClick={() => send(it)} disabled={!!sending[it.id]}
+                style={{ flex: 1, padding: '9px 4px', borderRadius: 8, border: 'none', background: C.accent, color: C.bg, fontWeight: 600, fontSize: 12.5, cursor: 'pointer', opacity: sending[it.id] ? 0.5 : 1 }}>
+                {sending[it.id] ? '送信中…' : '✅ この内容で送信'}
+              </button>
+            )}
+            <button onClick={() => copy(it)}
+              style={{ flex: 1, padding: '9px 4px', borderRadius: 8, border: `1px solid ${C.line}`, background: 'transparent', color: C.ink, fontSize: 12.5, cursor: 'pointer' }}>
+              📋 コピー
+            </button>
+            <a href={`https://www.chatwork.com/#!rid${it.target_room_id}`} target="_blank" rel="noreferrer"
+              style={{ flex: 1, padding: '9px 4px', borderRadius: 8, border: `1px solid ${C.line}`, background: 'transparent', color: C.ink, fontSize: 12.5, textAlign: 'center', textDecoration: 'none' }}>
+              💬 ルーム
+            </a>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderCommit, onToggleProject, activeLane, setActiveLane, singleLane }) {
   const wide = useWideScreen();
   const [adding, setAdding] = useState(null); // 追加中のレーンキー（null=なし）
@@ -1782,6 +1926,7 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
   const hasAny = groups.length > 0;
   return (
     <div style={S.colWrap}>
+      {activeLane === "today" && <InboxPanel />}
       {!singleLane && (
       <div style={S.taskTabs}>
         {TASK_LANES.map((L) => {
