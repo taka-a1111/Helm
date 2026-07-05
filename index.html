@@ -45,7 +45,7 @@ import {
   LayoutDashboard, Briefcase, ListChecks, Plus, X, Trash2, Reply,
   Clock, CheckCircle2, Circle, AlertTriangle, Inbox, Sparkles, Copy, Check,
   CalendarDays, Coins, ExternalLink, GripVertical, Settings, ChevronLeft, ChevronRight, ListPlus, Download, Upload,
-  AlignLeft, CornerDownRight, Link2, ArrowUpDown, Combine, Repeat, Pencil, Flag, ChevronUp,
+  AlignLeft, CornerDownRight, Link2, ArrowUpDown, Combine, Repeat, Pencil, Flag,
   Github, MessageCircle, Globe, FileText, Table, User, Hourglass, Search
 } from "https://esm.sh/lucide-react@0.383.0?deps=react@18.2.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-05m"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-05n"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1437,7 +1437,6 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
   const tRowMove = (e) => { if (tLp.current && tDown.current && Math.hypot(e.clientX - tDown.current.x, e.clientY - tDown.current.y) > 10) { clearTimeout(tLp.current); tLp.current = null; } };
   const tRowUp = () => { if (tLp.current) { clearTimeout(tLp.current); tLp.current = null; } };
   const replyN = replyTasksOf(p).length;
-  const li = linkInfo(p.replyUrl);
   const dl = p.deadline ? dateLabelJP(p.deadline) : null;
   const st = p.start ? dateLabelJP(p.start) : null;
   // ステータス別のカード色（相手待ち＝琥珀／支払い待ち＝緑）
@@ -3826,7 +3825,6 @@ const S = {
   calModalQuick: { display: "flex", gap: 8, marginTop: 12, padding: "0 4px" },
   calModalQuickBtn: { flex: 1, border: `1px solid ${C.line}`, background: "transparent", color: C.ink, fontSize: 14.5, fontWeight: 700, padding: "9px 6px", borderRadius: 10, cursor: "pointer" },
   calModalClear: { border: "none", background: "transparent", color: C.ink3, fontSize: 14.5, fontWeight: 600, padding: "8px 6px" },
-  calModalToday: { border: "none", background: "transparent", color: C.accent, fontSize: 14.5, fontWeight: 700, padding: "8px 6px" },
   cardMetaRow: { display: "none" },
   cardReward: { fontFamily: F.disp, fontWeight: 800, fontSize: 16, fontVariantNumeric: "tabular-nums", letterSpacing: 0.3, color: C.ink2, marginLeft: "auto" },
   cardDue: { display: "flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
@@ -3915,7 +3913,6 @@ const S = {
   taskAddRow: { display: "flex", alignItems: "center", gap: 8, border: `1px dashed ${C.line}`, background: "transparent", color: C.accent, fontSize: 15, fontWeight: 700, padding: "11px 12px", borderRadius: 10, width: "100%", justifyContent: "center" },
   taskSimpleRow: { display: "flex", alignItems: "center", gap: 8 },
   taskDragHandle: { display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", padding: 2, flexShrink: 0, cursor: "grab", touchAction: "none" },
-  taskSimpleTitle: { flex: 1, minWidth: 0, textAlign: "left", border: "none", background: "transparent", color: C.ink, fontSize: 16.5, fontWeight: 500, padding: "8px 0", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
 
   field: { display: "flex", flexDirection: "column", gap: 6 },
   fieldLabel: { fontSize: 14.5, fontWeight: 700, color: C.ink2, letterSpacing: 0.2 },
@@ -4027,7 +4024,7 @@ const S = {
 
   tcard: { position: "relative", textAlign: "left", display: "flex", cursor: "pointer", alignItems: "flex-start", gap: 10, background: "transparent", border: "none", borderRadius: 0, padding: "8px 0", cursor: "pointer", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" },
   tcardDone: { opacity: 0.62, cursor: "default" },
-  tcardTitle: { fontSize: 18, fontFamily: F.disp, fontWeight: 700, lineHeight: 1.35, letterSpacing: 0.15, color: C.ink, wordBreak: "break-word" },
+  tcardTitle: { fontSize: 19, fontFamily: F.disp, fontWeight: 700, lineHeight: 1.35, letterSpacing: 0.15, color: C.ink, wordBreak: "break-word" },
   tcardMeta: { display: "flex", alignItems: "center", gap: 7, marginTop: 6, flexWrap: "wrap" },
   tcardProject: { display: "flex", alignItems: "center", gap: 5, border: "none", background: "transparent", padding: 0, fontSize: 15.5, color: C.ink2, fontWeight: 600, minWidth: 0 },
   tcardCompany: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 220 },
@@ -4036,7 +4033,6 @@ const S = {
 
   moveWrap: { position: "relative", flexShrink: 0 },
   dueWrap: { position: "relative", display: "flex", alignItems: "center", gap: 5, marginTop: 7 },
-  kindChip: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, background: "transparent", padding: 0, flexShrink: 0 },
   kindSegRow: { display: "flex", gap: 6, flex: 1, minWidth: 0 },
   kindSegBtn: { display: "inline-flex", alignItems: "center", gap: 4, border: `1px solid ${C.line}`, background: "transparent", color: C.ink3, borderRadius: 8, padding: "6px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" },
   dueChip: { display: "flex", alignItems: "center", gap: 5, background: "transparent", fontSize: 19, fontWeight: 700, fontFamily: F.disp, whiteSpace: "nowrap" },
