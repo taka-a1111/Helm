@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-05l"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-05m"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -2963,9 +2963,13 @@ function CalendarModal({ value, onChange, onClose }) {
             );
           })}
         </div>
+        <div style={S.calModalQuick}>
+          <button style={S.calModalQuickBtn} onClick={() => pick(dStr(0))}>今日</button>
+          <button style={S.calModalQuickBtn} onClick={() => pick(dStr(1))}>明日</button>
+          <button style={S.calModalQuickBtn} onClick={() => pick(dStr(3))}>3日後</button>
+        </div>
         <div style={S.calModalFoot}>
           <button style={S.calModalClear} onClick={() => { onChange(""); onClose(); }}>削除</button>
-          <button style={S.calModalToday} onClick={() => pick(todayKey)}>今日</button>
         </div>
       </div>
     </div>
@@ -3782,7 +3786,7 @@ const S = {
   cardGrip: { display: "none" },
   cardMainRow: { display: "flex", alignItems: "flex-start", gap: 10, minWidth: 0 },
   cardCompanyWrap: { flex: 1, minWidth: 0, overflow: "hidden" },
-  cardDateInline: { position: "relative", flexShrink: 0, fontSize: 13.5, color: C.ink2, fontWeight: 600, cursor: "pointer" },
+  cardDateInline: { position: "relative", flexShrink: 0, fontSize: 19, color: C.ink2, fontWeight: 600, cursor: "pointer" },
   cardRewardInline: { flexShrink: 0, fontFamily: F.disp, fontWeight: 800, fontSize: 15, fontVariantNumeric: "tabular-nums", letterSpacing: 0.3, color: C.ink2 },
   cardDragging: { opacity: 0.85, boxShadow: `0 0 0 2px ${C.accent}, 0 10px 24px rgba(0,0,0,0.45)`, cursor: "grabbing" },
   cardDragOther: { transition: "transform 0.12s ease" },
@@ -3819,6 +3823,8 @@ const S = {
   calModalCellSel: { background: C.accent, color: "#fff" },
   calModalCellToday: { background: C.panel2 },
   calModalFoot: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, padding: "0 4px" },
+  calModalQuick: { display: "flex", gap: 8, marginTop: 12, padding: "0 4px" },
+  calModalQuickBtn: { flex: 1, border: `1px solid ${C.line}`, background: "transparent", color: C.ink, fontSize: 14.5, fontWeight: 700, padding: "9px 6px", borderRadius: 10, cursor: "pointer" },
   calModalClear: { border: "none", background: "transparent", color: C.ink3, fontSize: 14.5, fontWeight: 600, padding: "8px 6px" },
   calModalToday: { border: "none", background: "transparent", color: C.accent, fontSize: 14.5, fontWeight: 700, padding: "8px 6px" },
   cardMetaRow: { display: "none" },
