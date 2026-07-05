@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-05b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-05c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1107,7 +1107,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
           const delta = (r.top + r.height / 2) - sy;
           if (Math.abs(delta) > 4) window.scrollBy(0, delta);
           const r2 = cardEl.getBoundingClientRect();
-          if (ghost) { ghost.style.top = r2.top + "px"; ghost.style.height = r2.height + "px"; }
+          if (ghost) { ghost.style.height = r2.height + "px"; ghost.style.top = Math.round(sy - r2.height / 2) + "px"; }
         }
       } catch {}
       ready = true;
@@ -1587,9 +1587,17 @@ function makeRowGhost(el, startY, textOverride) {
   });
   g.dataset.gy = String(startY || 0);
   document.body.appendChild(g);
+  // 生成直後から指の真下（縦中央）に置く
+  if (startY) g.style.top = Math.round(startY - r.height / 2) + "px";
   return g;
 }
-function moveRowGhost(g, y) { if (g) g.style.transform = `translateY(${Math.round(y - Number(g.dataset.gy || 0))}px)`; }
+// ゴーストは常に「指の真下・縦中央」に絶対配置する（リスト縮小やスクロールでズレない）
+function moveRowGhost(g, y) {
+  if (!g) return;
+  const h = g.offsetHeight || 44;
+  g.style.transform = "none";
+  g.style.top = Math.round(y - h / 2) + "px";
+}
 function removeDragGhost(g) { if (g && g.parentNode) g.parentNode.removeChild(g); }
 
 function focusFilterCount(projects, key) {
