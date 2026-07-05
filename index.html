@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-05g"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-05h"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1602,6 +1602,12 @@ function focusFilterCount(projects, key) {
   }
   let c = 0;
   projects.forEach((p) => (p.tasks || []).forEach((t) => { if (!t.done && laneOf(p, t) === key) c++; }));
+  if (key === "today") projects.forEach((p) => {
+    if (p.id === INBOX_ID || p.status === "完了") return;
+    if ((p.tasks || []).some((t) => !t.done)) return;
+    const n = daysUntil(p.start);
+    if (n !== null && n <= 0) c++;
+  });
   return c;
 }
 // 案件一覧上部のフィルタチップ（件数付き）
@@ -1815,7 +1821,16 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
   const openTasksOf = (p) => (p.tasks || []).filter((t) => !t.done);
   const countOf = (lane) => {
     const st = laneStatusOf(lane);
-    if (!st) return all.filter((t) => t._lane === lane && !t.done).length;
+    if (!st) {
+      let c = all.filter((t) => t._lane === lane && !t.done).length;
+      if (lane === "today") projects.forEach((p) => {
+        if (p.id === INBOX_ID || p.status === "完了") return;
+        if (openTasksOf(p).length > 0) return;
+        const n = daysUntil(p.start);
+        if (n !== null && n <= 0) c++;
+      });
+      return c;
+    }
     let c = 0;
     projects.forEach((p) => { if (p.id !== INBOX_ID && p.status === st) { const n = openTasksOf(p).length; c += n > 0 ? n : 1; } });
     return c;
@@ -1836,6 +1851,13 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
     if (!doneOnly) {
       const st = laneStatusOf(lane);
       if (st) projects.forEach((p) => { if (p.id === INBOX_ID || p.status !== st || gmap.has(p.id)) return; groups.push({ project: p, tasks: [], projectOnly: true }); });
+      // 今日レーン：着手日（いつやる）が今日以前でタスクを持たない案件を案件行として出す
+      if (lane === "today") projects.forEach((p) => {
+        if (p.id === INBOX_ID || p.status === "完了" || gmap.has(p.id)) return;
+        if (openTasksOf(p).length > 0) return; // タスクがあればそちらで表示
+        const n = daysUntil(p.start);
+        if (n !== null && n <= 0) groups.push({ project: p, tasks: [], projectOnly: true, startRow: true });
+      });
     }
     return groups;
   };
@@ -1855,9 +1877,13 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
       <div style={S.taskGroupTasks}>
         {g.projectOnly ? (
           <button style={S.tcard} onClick={() => onOpen(g.project)}>
-            <span style={{ ...S.waitRowIcon, color: lane === "payment" ? "#51CF66" : "#D9A23B" }}>{lane === "payment" ? "💰" : "⏳"}</span>
+            {g.startRow ? (
+              <span style={{ ...S.waitRowIcon, color: C.accent }}><CalendarDays size={17} strokeWidth={2.3} /></span>
+            ) : (
+              <span style={{ ...S.waitRowIcon, color: lane === "payment" ? "#51CF66" : "#D9A23B" }}>{lane === "payment" ? "💰" : "⏳"}</span>
+            )}
             <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
-              <div style={S.tcardTitle}>{lane === "payment" ? "入金待ち" : "先方の返信・対応待ち"}</div>
+              <div style={S.tcardTitle}>{g.startRow ? "本日着手" : (lane === "payment" ? "入金待ち" : "先方の返信・対応待ち")}</div>
               {g.project.deadline && <div style={S.tcardMeta}><span style={S.tcardCompany}>納期 {dateLabelJP(g.project.deadline).text}</span></div>}
             </div>
           </button>
