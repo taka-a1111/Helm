@@ -45,7 +45,7 @@ import {
   LayoutDashboard, Briefcase, ListChecks, Plus, X, Trash2, Reply,
   Clock, CheckCircle2, Circle, AlertTriangle, Inbox, Sparkles, Copy, Check,
   CalendarDays, Coins, ExternalLink, GripVertical, Settings, ChevronLeft, ChevronRight, ListPlus, Download, Upload,
-  AlignLeft, CornerDownRight, Link2, ArrowUpDown, Combine, Repeat, Pencil, Flag,
+  AlignLeft, CornerDownRight, Link2, ArrowUpDown, Combine, Repeat, Pencil, Flag, ChevronUp,
   Github, MessageCircle, Globe, FileText, Table, User, Hourglass, Search
 } from "https://esm.sh/lucide-react@0.383.0?deps=react@18.2.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-05j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-05k"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1523,17 +1523,20 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
         <div style={S.cardTaskList}>
           {showTasks.map((t) => (
             <div key={t.id} data-tid={t.id} data-pid={p.id}
-              style={{ ...S.cardTaskRow, alignItems: "center", touchAction: taskDragId ? "none" : "pan-y" }}
+              style={{ ...S.cardTaskRow, touchAction: taskDragId ? "none" : "pan-y" }}
               onPointerDown={(e) => tRowDown(e, t.id)} onPointerMove={tRowMove} onPointerUp={tRowUp} onPointerCancel={tRowUp}
               onClick={(e) => { stop(e); onEditTask && onEditTask(p.id, t.id, "title"); }}>
               <button style={S.cardTaskCheck} onPointerDown={stop}
                 onClick={(e) => { stop(e); onToggleTask && onToggleTask(p.id, t.id); }} title="タスクを完了">
                 <Circle size={18} color={C.ink3} strokeWidth={2} />
               </button>
-              <span style={{ ...S.cardTaskTitle, flex: 1, minWidth: 0 }}>
-                {t.repeat && <Repeat size={13} color={C.accent} strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-2px" }} />}
-                {t.title || "（無題）"}
-              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={S.cardTaskTitle}>
+                  {t.repeat && <Repeat size={13} color={C.accent} strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-2px" }} />}
+                  {t.title || "（無題）"}
+                </span>
+                <TaskMetaChips t={t} />
+              </div>
             </div>
           ))}
           {moreTasks > 0 && <div style={S.cardTaskMore}>ほか {moreTasks} 件</div>}
@@ -2204,7 +2207,8 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
   const dismissAllDiff = () => { setPendingDiff([]); setParseMsg("反映をキャンセルしました。"); };
 
   const [justAddedId, setJustAddedId] = useState(null);
-  const addTask = () => { const id = uid(); set("tasks", [...d.tasks, { id, title: "", done: false, due: "", start: "", lane: "later", kind: "task", note: "", repeat: null, links: [] }]); setJustAddedId(id); };
+  const [openTaskId, setOpenTaskId] = useState(null);
+  const addTask = () => { const id = uid(); set("tasks", [...d.tasks, { id, title: "", done: false, due: "", start: "", lane: "later", kind: "task", note: "", repeat: null, links: [] }]); setJustAddedId(id); setOpenTaskId(id); };
   const setTask = (id, k, v) => set("tasks", d.tasks.map((t) => t.id === id ? { ...t, [k]: v } : t));
   const patchTask = (id, patch) => set("tasks", d.tasks.map((t) => t.id === id ? { ...t, ...patch } : t));
   const delTask = (id) => set("tasks", d.tasks.filter((t) => t.id !== id));
@@ -2439,6 +2443,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
           </div>
           <div style={S.taskEditList}>
             {d.tasks.filter((t) => !t.done).map((t) => (
+              openTaskId === t.id ? (
               <div key={t.id} style={S.taskEditRow}>
                 <div style={S.taskEditTop}>
                   <button style={S.checkBtn} onClick={() => setTask(t.id, "done", !t.done)}>
@@ -2446,9 +2451,10 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
                   </button>
                   <AutoHeightTextarea style={{ ...S.taskInput, ...(t.done ? S.trowDone : {}) }} value={t.title}
                     autoFocus={t.id === justAddedId}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.blur(); closeWithSave(); } }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.blur(); setOpenTaskId(null); } }}
                     placeholder="やること" onChange={(e) => setTask(t.id, "title", e.target.value)} />
-                  <button style={S.iconBtnSm} onClick={() => delTask(t.id)}><Trash2 size={14} color="#8B95A5" /></button>
+                  <button style={S.iconBtnSm} onClick={() => setOpenTaskId(null)} title="閉じる"><ChevronUp size={16} color="#8B95A5" /></button>
+                  <button style={S.iconBtnSm} onClick={() => { delTask(t.id); setOpenTaskId(null); }}><Trash2 size={14} color="#8B95A5" /></button>
                 </div>
                 <textarea style={S.taskNoteInput} value={t.note || ""} rows={1}
                   placeholder="詳細・メモ" onChange={(e) => setTask(t.id, "note", e.target.value)} />
@@ -2462,6 +2468,17 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
                 </div>
                 <LinksField links={t.links} onChange={(v) => setTask(t.id, "links", v)} />
               </div>
+              ) : (
+              <div key={t.id} style={S.taskSimpleRow}>
+                <button style={S.checkBtn} onClick={() => setTask(t.id, "done", !t.done)} title="タスクを完了">
+                  <Circle size={18} color={C.ink3} strokeWidth={2} />
+                </button>
+                <button style={S.taskSimpleTitle} onClick={() => setOpenTaskId(t.id)}>
+                  {t.repeat && <Repeat size={13} color={C.accent} strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-2px" }} />}
+                  {t.title || "（無題）"}
+                </button>
+              </div>
+              )
             ))}
             <button style={S.taskAddRow} onClick={addTask}>
               <Plus size={17} strokeWidth={2.6} />タスクを追加
@@ -3891,6 +3908,8 @@ const S = {
   subtaskHeadLabel: { flex: 1, fontSize: 16, color: C.ink2, fontWeight: 600 },
   subtaskAddBtn: { display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: C.accent, fontSize: 14.5, fontWeight: 700, padding: "2px 4px" },
   taskAddRow: { display: "flex", alignItems: "center", gap: 8, border: `1px dashed ${C.line}`, background: "transparent", color: C.accent, fontSize: 15, fontWeight: 700, padding: "11px 12px", borderRadius: 10, width: "100%", justifyContent: "center" },
+  taskSimpleRow: { display: "flex", alignItems: "center", gap: 12 },
+  taskSimpleTitle: { flex: 1, minWidth: 0, textAlign: "left", border: "none", background: "transparent", color: C.ink, fontSize: 16.5, fontWeight: 500, padding: "8px 0", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
 
   field: { display: "flex", flexDirection: "column", gap: 6 },
   fieldLabel: { fontSize: 14.5, fontWeight: 700, color: C.ink2, letterSpacing: 0.2 },
