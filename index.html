@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-07b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-07d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -442,6 +442,25 @@ export default function App() {
       // カレンダー画面は月移動を calGrid 側で拾う（e.stopPropagation で main まで届かない）
     }
   };
+  // キーボードでフィルタタブを左右移動：Ctrl+Tab=右 / Ctrl+Shift+Tab=左（ブラウザが予約している環境では届かないため Ctrl+→ / Ctrl+← でも移動）
+  useEffect(() => {
+    const onKey = (e) => {
+      if (view !== "focus") return;
+      const isTab = e.key === "Tab" && e.ctrlKey && !e.altKey && !e.metaKey;
+      const isArrow = (e.key === "ArrowRight" || e.key === "ArrowLeft") && e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey;
+      if (!isTab && !isArrow) return;
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (isArrow && (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT")) return; // 入力中のカーソル移動は奪わない
+      e.preventDefault();
+      const keys = FOCUS_FILTERS.map((f) => f.key);
+      const idx = keys.indexOf(focusFilter);
+      const dir = isTab ? (e.shiftKey ? -1 : 1) : (e.key === "ArrowRight" ? 1 : -1);
+      const next = idx + dir;
+      if (next >= 0 && next < keys.length) setFocusFilter(keys[next]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [view, focusFilter]);
   const [editing, setEditing] = useState(null); // draft object or null
   const [focusTaskId, setFocusTaskId] = useState(null); // タスクから開いたとき、上部に表示するタスクID
   const openProjectTask = (project, taskId) => { setFocusTaskId(taskId || null); setEditing(project); };
@@ -1323,7 +1342,12 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
                     const n = daysUntil(p.start);
                     if (n !== null && n <= 0) return "today";
                     if (n === 1) return "tomorrow";
+                    return "later";
                   }
+                  // 自分でやるタスク（日付なし=later含む）が1つでもあれば日付区分。無ければ相手待ち＞支払い待ち
+                  if (lanes.includes("later")) return "later";
+                  if (lanes.includes("waiting")) return "waiting";
+                  if (lanes.includes("payment")) return "payment";
                   return "later";
                 };
                 const prog = cardList.filter((p) => p.status === "進行中");
@@ -1332,10 +1356,14 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
                       { key: "today",    label: "今日",       color: "#6B8AFF", items: prog.filter((p) => laneP(p) === "today"), bar: true },
                       { key: "tomorrow", label: "明日",       color: "#9AA4B2", items: prog.filter((p) => laneP(p) === "tomorrow"), bar: true },
                       { key: "later",    label: "明後日以降", color: "#9AA4B2", items: prog.filter((p) => laneP(p) === "later"), bar: true },
-                      { key: "waiting", label: "相手待ち",   color: "#D9A23B", items: cardList.filter((p) => p.status === "相手待ち"), bar: true },
-                      { key: "payment", label: "支払い待ち", color: "#51CF66", items: cardList.filter((p) => p.status === "支払い待ち"), bar: true },
+                      { key: "waiting", label: "相手待ち",   color: "#D9A23B", items: [...prog.filter((p) => laneP(p) === "waiting"), ...cardList.filter((p) => p.status === "相手待ち")], bar: true },
+                      { key: "payment", label: "支払い待ち", color: "#51CF66", items: [...prog.filter((p) => laneP(p) === "payment"), ...cardList.filter((p) => p.status === "支払い待ち")], bar: true },
                     ]
-                  : FOCUS_STATUSES.map(({ key, color }) => ({ key, label: key, color, items: cardList.filter((p) => p.status === key), bar: key !== "進行中" }));
+                  : [
+                      { key: "進行中",     label: "進行中",     color: "#C0C9D6", items: prog.filter((p) => { const l = laneP(p); return l !== "waiting" && l !== "payment"; }), bar: false },
+                      { key: "相手待ち",   label: "相手待ち",   color: "#D9A23B", items: [...prog.filter((p) => laneP(p) === "waiting"), ...cardList.filter((p) => p.status === "相手待ち")], bar: true },
+                      { key: "支払い待ち", label: "支払い待ち", color: "#51CF66", items: [...prog.filter((p) => laneP(p) === "payment"), ...cardList.filter((p) => p.status === "支払い待ち")], bar: true },
+                    ];
                 return groups.map((g) => {
                   if (g.items.length === 0) return null;
                   return (
