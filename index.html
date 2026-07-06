@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-06c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-07a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -904,7 +904,7 @@ export default function App() {
         return prev.map((p) => {
           if (p.id !== srcPid) return p;
           const from = p.tasks.findIndex((t) => t.id === dragTid);
-          const to = p.tasks.findIndex((t) => t.id === overTid);
+          const to = overTid === "__top__" ? 0 : p.tasks.findIndex((t) => t.id === overTid);
           if (from < 0 || to < 0) return p;
           const a = [...p.tasks]; const [m] = a.splice(from, 1); a.splice(to, 0, m);
           return { ...p, tasks: a };
@@ -922,8 +922,8 @@ export default function App() {
       if (!moved) return prev;
       return removed.map((p) => {
         if (p.id !== overPid) return p;
-        const to = p.tasks.findIndex((t) => t.id === overTid);
         const a = [...p.tasks];
+        const to = overTid === "__top__" ? 0 : a.findIndex((t) => t.id === overTid);
         a.splice(to < 0 ? a.length : to, 0, moved);
         return { ...p, tasks: a };
       });
@@ -988,7 +988,7 @@ export default function App() {
       <main style={S.main} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
         {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
         {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} />}
-        {view === "focus" && focusFilter !== "all" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} activeLane={focusFilter} setActiveLane={setFocusFilter} />}
+        {view === "focus" && focusFilter !== "all" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} activeLane={focusFilter} setActiveLane={setFocusFilter} />}
         {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
       </main>
 
@@ -1615,12 +1615,25 @@ function focusFilterCount(projects, key) {
 }
 // 案件一覧上部のフィルタチップ（件数付き）
 function FilterChips({ projects, filter, onChange }) {
+  const wrapRef = useRef(null);
+  // アクティブなチップ（青下線）が画面外に出ないよう、切替のたびに横スクロールを追従させる
+  useEffect(() => {
+    const wrap = wrapRef.current; if (!wrap) return;
+    const btn = wrap.querySelector(`[data-fkey="${filter}"]`); if (!btn) return;
+    try {
+      const pad = 28;
+      const left = btn.offsetLeft, right = left + btn.offsetWidth;
+      const go = (x) => { if (wrap.scrollTo) wrap.scrollTo({ left: x, behavior: "smooth" }); else wrap.scrollLeft = x; };
+      if (left - pad < wrap.scrollLeft) go(Math.max(0, left - pad));
+      else if (right + pad > wrap.scrollLeft + wrap.clientWidth) go(right + pad - wrap.clientWidth);
+    } catch {}
+  }, [filter]);
   return (
-    <div style={S.filterChips}>
+    <div ref={wrapRef} style={S.filterChips}>
       {FOCUS_FILTERS.map((f) => {
         const on = filter === f.key;
         return (
-          <button key={f.key} onClick={() => onChange(f.key)}
+          <button key={f.key} data-fkey={f.key} onClick={() => onChange(f.key)}
             style={{ ...S.filterChip, ...(on ? S.filterChipOn : {}) }}>
             {f.label}
             <span style={{ ...S.filterChipCount, ...(on ? { color: C.accent } : {}) }}>{focusFilterCount(projects, f.key)}</span>
@@ -1770,11 +1783,12 @@ function InboxPanel() {
   );
 }
 
-function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderCommit, onToggleProject, activeLane, setActiveLane, singleLane }) {
+function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderProject, onSortManual, onReorderCommit, onToggleProject, activeLane, setActiveLane, singleLane }) {
   const wide = useWideScreen();
   const [adding, setAdding] = useState(null); // 追加中のレーンキー（null=なし）
   const [openDone, setOpenDone] = useState(() => new Set()); // アコーディオンで完了を開いているレーン
   const [dragTid, setDragTid] = useState(null);
+  const [dragGid, setDragGid] = useState(null); // ドラッグ中の案件グループ
   const toggleOpenDone = (lane) => setOpenDone((prev) => {
     const next = new Set(prev);
     if (next.has(lane)) next.delete(lane); else next.add(lane);
@@ -1797,6 +1811,15 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
         const laneEl = row.closest && row.closest("[data-lane]");
         const overLane = laneEl ? laneEl.getAttribute("data-lane") : dragLane;
         if (overLane === dragLane && overTid && overTid !== tid) onReorderTask && onReorderTask(tid, overPid, overTid);
+        return;
+      }
+      // 案件名（グループ見出し）の上に来たら、その案件の先頭へ移動（案件またぎ）
+      const grp = elAt && elAt.closest && elAt.closest("[data-gpid]");
+      if (grp) {
+        const overPid = grp.getAttribute("data-gpid");
+        const laneEl = grp.closest && grp.closest("[data-lane]");
+        const overLane = laneEl ? laneEl.getAttribute("data-lane") : dragLane;
+        if (overLane === dragLane && overPid) onReorderTask && onReorderTask(tid, overPid, "__top__");
       }
     };
     const up = () => {
@@ -1806,6 +1829,43 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
       document.removeEventListener("touchmove", blockScroll);
       removeDragGhost(ghost);
       setDragTid(null);
+      onReorderCommit && onReorderCommit();
+      const swallow = (ce) => { ce.stopPropagation(); ce.preventDefault(); document.removeEventListener("click", swallow, true); };
+      document.addEventListener("click", swallow, true);
+      setTimeout(() => document.removeEventListener("click", swallow, true), 450);
+    };
+    const blockScroll = (ev) => { if (ev.cancelable) ev.preventDefault(); };
+    document.addEventListener("touchmove", blockScroll, { passive: false });
+    document.addEventListener("pointermove", move, { passive: false });
+    document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", up);
+  };
+
+  // 長押し→上下ドラッグで案件グループ（案件名）を並べ替え。序列は案件配列そのものを更新するので全タブに反映される
+  const startGroupDrag = (pid, el, pointerId, dragLane, name, sx, sy) => {
+    try { el && el.setPointerCapture && pointerId != null && el.setPointerCapture(pointerId); } catch {}
+    onSortManual && onSortManual(); // 手動並びへ切替（再ソートで戻らないように）
+    setDragGid(pid);
+    const ghost = makeRowGhost(el, sy || 0, name);
+    const move = (ev) => {
+      if (ev.cancelable) ev.preventDefault();
+      moveRowGhost(ghost, ev.clientY);
+      const elAt = document.elementFromPoint(ev.clientX, ev.clientY);
+      const grp = elAt && elAt.closest && elAt.closest("[data-gpid]");
+      if (grp) {
+        const overPid = grp.getAttribute("data-gpid");
+        const laneEl = grp.closest && grp.closest("[data-lane]");
+        const overLane = laneEl ? laneEl.getAttribute("data-lane") : dragLane;
+        if (overLane === dragLane && overPid && overPid !== pid) onReorderProject && onReorderProject(pid, overPid);
+      }
+    };
+    const up = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", up);
+      document.removeEventListener("touchmove", blockScroll);
+      removeDragGhost(ghost);
+      setDragGid(null);
       onReorderCommit && onReorderCommit();
       const swallow = (ce) => { ce.stopPropagation(); ce.preventDefault(); document.removeEventListener("click", swallow, true); };
       document.addEventListener("click", swallow, true);
@@ -1841,21 +1901,15 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
   const doneCountLane = (lane) => all.filter((t) => t._lane === lane && t.done && !isArchivedTask(t)).length;
 
   const renderGroups = (lane, groups) => groups.map((g) => (
-    <div key={g.project.id} style={S.taskGroup}>
-      <button style={S.taskGroupHead} onClick={() => { if (g.project.id !== INBOX_ID) onOpen(g.project); }}>
-        {g.project.id !== INBOX_ID && (
-          <span style={S.groupCheck} title="案件を完了"
-            onClick={(e) => { e.stopPropagation(); onToggleProject && onToggleProject(g.project.id); }}>
-            <Circle size={18} color="#3A434F" strokeWidth={2.2} />
-          </span>
-        )}
-        <span style={S.taskGroupName}>{g.project.company}</span>
-      </button>
+    <div key={g.project.id} style={S.taskGroup} data-gpid={g.project.id}>
+      <GroupHead project={g.project} lane={lane}
+        dragActive={dragTid !== null || dragGid !== null}
+        onStartDrag={startGroupDrag} onOpen={onOpen} onToggleProject={onToggleProject} />
       <div style={S.taskGroupTasks}>
         {g.tasks.map((t) => (
           <TaskCard key={t.id} t={t} lane={lane}
             onToggle={onToggle} onOpen={onOpen} onOpenTask={onOpenTask} onEditTask={onEditTask}
-            dragging={dragTid === t.id} dragActive={dragTid !== null}
+            dragging={dragTid === t.id} dragActive={dragTid !== null || dragGid !== null}
             onStartDrag={startTaskDrag}
             onChangeStart={(start) => onChangeStart(t.project.id, t.id, start)}
             onChangeDue={(due) => onChangeDue(t.project.id, t.id, due)}
@@ -1958,6 +2012,38 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
         )}
       </div>
     </div>
+  );
+}
+
+// 案件グループの見出し（案件名行）。長押し180msでグループごと並べ替えドラッグ、タップで案件詳細
+function GroupHead({ project, lane, dragActive, onStartDrag, onOpen, onToggleProject }) {
+  const lpTimer = useRef(null);
+  const downInfo = useRef(null);
+  const gdown = (e) => {
+    if (e.target.closest && e.target.closest("input, a, label, [data-gcheck]")) return; // 完了◯などは除外
+    downInfo.current = { el: e.currentTarget, pointerId: e.pointerId, x: e.clientX, y: e.clientY };
+    lpTimer.current = setTimeout(() => {
+      if (downInfo.current && onStartDrag) onStartDrag(project.id, downInfo.current.el, downInfo.current.pointerId, lane, project.company, downInfo.current.x, downInfo.current.y);
+    }, 180);
+  };
+  const gmove = (e) => {
+    if (!downInfo.current || !lpTimer.current) return;
+    if (Math.hypot(e.clientX - downInfo.current.x, e.clientY - downInfo.current.y) > 10) { clearTimeout(lpTimer.current); lpTimer.current = null; }
+  };
+  const gup = () => { if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = null; } };
+  return (
+    <button style={{ ...S.taskGroupHead, touchAction: dragActive ? "none" : "pan-y" }}
+      onContextMenu={(e) => e.preventDefault()}
+      onPointerDown={gdown} onPointerMove={gmove} onPointerUp={gup} onPointerCancel={gup}
+      onClick={() => { if (project.id !== INBOX_ID) onOpen(project); }}>
+      {project.id !== INBOX_ID && (
+        <span style={S.groupCheck} data-gcheck title="案件を完了"
+          onClick={(e) => { e.stopPropagation(); onToggleProject && onToggleProject(project.id); }}>
+          <Circle size={18} color="#3A434F" strokeWidth={2.2} />
+        </span>
+      )}
+      <span style={S.taskGroupName}>{project.company}</span>
+    </button>
   );
 }
 
