@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-07j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-09a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -143,6 +143,7 @@ const FOCUS_STATUSES = [
 
 // 案件一覧のフィルタチップ（すべて＋タスクレーン）
 const FOCUS_FILTERS = [
+  { key: "registry", label: "案件一覧" },
   { key: "all",     label: "すべて" },
   { key: "today",    label: "今日" },
   { key: "tomorrow", label: "明日" },
@@ -320,14 +321,36 @@ function laneFromDue(due) {
   return "later";
 }
 function normalizeProjects(arr) {
-  let list = arr.map((p) => ({
-    ...p,
-    status: STATUS_MIGRATE[p.status] || p.status || "進行中",
-    start: p.start ?? "",
-    received: p.received ?? "", replyDraft: p.replyDraft ?? "", repliedAt: p.repliedAt ?? null, replyUrl: p.replyUrl ?? "", replyHistory: p.replyHistory ?? [], summary: p.summary ?? "",
-    links: (Array.isArray(p.links) ? p.links : []).filter((l) => l && (l.url || l.label)).map((l) => ({ id: l.id || uid(), label: l.label ?? "", url: l.url ?? "" })),
-    tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "", note: t.note ?? "", repeat: t.repeat ?? null, doneAt: t.doneAt ?? (t.done ? Date.now() : null), links: (Array.isArray(t.links) ? t.links : []).filter((l) => l && (l.url || l.label)).map((l) => ({ id: l.id || uid(), label: l.label ?? "", url: l.url ?? "" })) })),
-  }));
+  let list = arr.map((p) => {
+    const base = {
+      ...p,
+      status: STATUS_MIGRATE[p.status] || p.status || "進行中",
+      start: p.start ?? "",
+      received: p.received ?? "", replyDraft: p.replyDraft ?? "", repliedAt: p.repliedAt ?? null, replyUrl: p.replyUrl ?? "", replyHistory: p.replyHistory ?? [], summary: p.summary ?? "",
+      tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "", note: t.note ?? "", repeat: t.repeat ?? null, doneAt: t.doneAt ?? (t.done ? Date.now() : null) })),
+    };
+    // ★リンク一元化：案件links＋返信先URL＋全タスクlinks を案件へ寄せ、重複URLは1本化。返信先は kind:reply。タスクからlinksは除去。
+    const merged = []; const seen = new Set();
+    const pushLink = (l, isReply) => {
+      const url = (l && l.url ? String(l.url) : "").trim();
+      const label = (l && l.label ? String(l.label) : "").trim();
+      if (!url && !label) return;
+      const k = url.toLowerCase();
+      if (url && seen.has(k)) { if (isReply) { const ex = merged.find((m) => (m.url || "").toLowerCase() === k); if (ex) ex.kind = "reply"; } return; }
+      if (url) seen.add(k);
+      const o = { id: (l && l.id) || uid(), label, url };
+      if (isReply || (l && l.kind === "reply")) o.kind = "reply";
+      merged.push(o);
+    };
+    if (base.replyUrl && base.replyUrl.trim()) pushLink({ label: "返信", url: base.replyUrl }, true);
+    (Array.isArray(p.links) ? p.links : []).forEach((l) => pushLink(l, l && l.kind === "reply"));
+    (p.tasks || []).forEach((t) => (Array.isArray(t.links) ? t.links : []).forEach((l) => pushLink(l, false)));
+    base.links = merged;
+    base.tasks = base.tasks.map((t) => { const { links, ...rest } = t; return rest; });
+    const rep = merged.find((m) => m.kind === "reply");
+    base.replyUrl = rep ? rep.url : "";
+    return base;
+  });
   if (!list.some((p) => p.id === INBOX_ID)) list = [...list, makeInbox()];
   return list;
 }
@@ -442,6 +465,7 @@ export default function App() {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("focus");
+  const headerRef = useRef(null);
   const [navStack, setNavStack] = useState([]); // 画面遷移の履歴（戻る用）
   const [focusFilter, setFocusFilter] = useState("all"); // 案件一覧のフィルタ（すべて/今日/明日/明後日以降/相手待ち/支払い待ち）
   // ===== 全体検索（Ctrl+K / ヘッダ🔍） =====
@@ -479,6 +503,13 @@ export default function App() {
   const wide = useWideScreen(); // PCではタスク画面を横幅いっぱいに広げる
   const VIEWS = ["focus", "calendar"];
   useEffect(() => { try { window.scrollTo(0, 0); const m = document.querySelector("main"); if (m) m.scrollTop = 0; } catch {} }, [view]);
+  // 追従バー（フィルタチップ）をヘッダー直下に貼り付けるため、ヘッダー実高を CSS 変数に反映
+  useEffect(() => {
+    const setH = () => { try { const el = headerRef.current; if (el) document.documentElement.style.setProperty("--headerH", el.offsetHeight + "px"); } catch {} };
+    setH();
+    window.addEventListener("resize", setH);
+    return () => window.removeEventListener("resize", setH);
+  }, [wide, view]);
   const go = (v) => { if (v !== view) { setNavStack((s) => [...s, view]); setView(v); } };
   const winW = () => (typeof window !== "undefined" ? window.innerWidth : 400);
   const EDGE = 28;
@@ -524,6 +555,21 @@ export default function App() {
   const [confirmDel, setConfirmDel] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [editTask, setEditTask] = useState(null); // { pid, tid, focus } サブタスク単体の編集
+  // 日付が変わったら（開きっぱなしでも）自動で最新化。編集中は暴発させない
+  useEffect(() => {
+    const dayKey = () => { const d = new Date(); return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate(); };
+    let last = dayKey();
+    const check = () => {
+      if (dayKey() === last) return;
+      last = dayKey();
+      if (editing || editTask || showSettings) return;
+      try { window.location.reload(); } catch {}
+    };
+    const id = setInterval(check, 30000);
+    const onVis = () => { if (document.visibilityState === "visible") check(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
+  }, [editing, editTask, showSettings]);
   const [shareIntent, setShareIntent] = useState(null); // PWA共有で受け取った{text,url}。案件選択待ち
   const removeTaskFromProject = (pid, tid) =>
     persist(projects.map((p) => p.id !== pid ? p : { ...p, tasks: p.tasks.filter((t) => t.id !== tid) }));
@@ -1040,7 +1086,7 @@ export default function App() {
       <Fonts />
 
       {/* ===== Header ===== */}
-      <header style={S.header}>
+      <header ref={headerRef} style={S.header}>
         <div style={{ ...S.brand, cursor: "pointer" }} onClick={() => { if (typeof window !== "undefined") window.location.reload(); }} title="タップで再読み込み">
           <div style={S.brandMark}>H</div>
           <div style={S.brandDate}>{(() => { const d = new Date(); return `${d.getMonth() + 1}月${d.getDate()}日（${WD_JP[d.getDay()]}）`; })()}</div>
@@ -1075,8 +1121,9 @@ export default function App() {
       {/* ===== Body ===== */}
       <main style={S.main} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
         {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
+        {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} />}
         {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} />}
-        {view === "focus" && focusFilter !== "all" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} activeLane={focusFilter} setActiveLane={setFocusFilter} />}
+        {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} activeLane={focusFilter} setActiveLane={setFocusFilter} />}
         {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
       </main>
 
@@ -1111,7 +1158,7 @@ export default function App() {
           <SubtaskSheet project={p} task={t} focus={editTask.focus}
             onClose={goBack}
             onUpdate={(patch) => updateTask(editTask.pid, editTask.tid, patch)}
-            onToggle={() => { toggleTask(editTask.pid, editTask.tid); goBack(); }}
+            onToggle={() => toggleTask(editTask.pid, editTask.tid)}
             onDelete={() => { removeTaskFromProject(editTask.pid, editTask.tid); goBack(); }} />
         );
       })()}
@@ -1711,6 +1758,48 @@ function focusFilterCount(projects, key) {
   return c;
 }
 // 案件一覧上部のフィルタチップ（件数付き）
+function ProjectListView({ projects, onOpen }) {
+  const [showDone, setShowDone] = useState(false);
+  const recency = (p) => {
+    let m = (typeof p.repliedAt === "number") ? p.repliedAt : 0;
+    if (typeof p.createdAt === "number" && p.createdAt > m) m = p.createdAt;
+    (p.tasks || []).forEach((t) => { if (typeof t.doneAt === "number" && t.doneAt > m) m = t.doneAt; });
+    return m;
+  };
+  const open = projects.filter((p) => p.id !== INBOX_ID && p.status !== "完了").sort((a, b) => recency(b) - recency(a));
+  const doneList = projects.filter((p) => p.id !== INBOX_ID && p.status === "完了").sort((a, b) => recency(b) - recency(a));
+  const Row = ({ p, dim }) => (
+    <div style={{ ...S.plItem, ...(dim ? { opacity: 0.55 } : {}) }}>
+      <button style={S.plName} onClick={() => onOpen(p)}>{p.company || "（無題）"}</button>
+      {p.links && p.links.length > 0 && (
+        <div style={S.plLinks}>
+          {p.links.map((l) => (
+            <a key={l.id} href={l.url || undefined} target="_blank" rel="noopener noreferrer"
+              style={{ ...S.plLink, ...(l.kind === "reply" ? S.plLinkReply : {}) }}
+              onClick={(e) => { e.stopPropagation(); if (!l.url) e.preventDefault(); }} title={l.url || ""}>
+              {linkLabelOf(l)}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+  return (
+    <div style={S.colWrap}>
+      {open.length === 0 && <div style={S.plEmpty}>案件がありません</div>}
+      {open.map((p) => <Row key={p.id} p={p} />)}
+      {doneList.length > 0 && (
+        <>
+          <button style={{ ...S.doneAccordion, marginTop: 10 }} onClick={() => setShowDone((v) => !v)}>
+            <ChevronRight size={13} strokeWidth={2.4} style={{ transform: showDone ? "rotate(90deg)" : "none", transition: "transform 0.15s" }} />
+            完了 ({doneList.length}件)
+          </button>
+          {showDone && doneList.map((p) => <Row key={p.id} p={p} dim />)}
+        </>
+      )}
+    </div>
+  );
+}
 function FilterChips({ projects, filter, onChange }) {
   const wrapRef = useRef(null);
   // アクティブなチップ（青下線）が画面外に出ないよう、切替のたびに横スクロールを追従させる
@@ -3035,24 +3124,26 @@ function SubtaskSheet({ project, task, focus, onClose, onUpdate, onToggle, onDel
             <DateField value={task.due} placeholder="期限" onChange={(v) => onUpdate({ due: v })} />
             <RepeatField value={task.repeat} onChange={(patch) => onUpdate(patch)} />
           </div>
-          <div style={S.infoRow}>
-            <Link2 size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
-            <LinksField links={task.links} onChange={(v) => onUpdate({ links: v })} />
-          </div>
           {task.kind !== "reply" && (
             <div style={S.infoRow}>
               <ListChecks size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
               <div style={S.kindSegRow}>
                 {[
-                  { k: "task",    label: "自分でやる",   Icon: User,      color: C.ink2 },
-                  { k: "waiting", label: "相手待ち",     Icon: Hourglass, color: "#D9A23B" },
-                  { k: "payment", label: "支払い待ち",   Icon: Coins,     color: "#51CF66" },
+                  { k: "task",    label: "進行中",     Icon: User,      color: C.ink2 },
+                  { k: "waiting", label: "相手待ち",   Icon: Hourglass, color: "#D9A23B" },
+                  { k: "payment", label: "支払い待ち", Icon: Coins,     color: "#51CF66" },
+                  { k: "done",    label: "完了",       Icon: Check,     color: "#51CF66" },
                 ].map((o) => {
-                  const active = (task.kind || "task") === o.k;
+                  const isDone = !!task.done;
+                  const active = o.k === "done" ? isDone : (!isDone && (task.kind || "task") === o.k);
                   return (
                     <button key={o.k}
                       style={{ ...S.kindSegBtn, ...(active ? { background: C.panel2, color: C.ink, borderColor: "transparent" } : {}) }}
-                      onClick={() => onUpdate({ kind: o.k })}>
+                      onClick={() => {
+                        if (o.k === "done") onToggle();
+                        else if (isDone) onUpdate({ done: false, doneAt: null, kind: o.k });
+                        else onUpdate({ kind: o.k });
+                      }}>
                       <o.Icon size={13} color={active ? o.color : C.ink3} strokeWidth={2.3} />
                       {o.label}
                     </button>
@@ -4235,7 +4326,7 @@ const S = {
 
   /* task tabs (Googleタスク風) */
   taskTabs: { display: "flex", gap: 7, overflowX: "auto", marginBottom: 14, paddingBottom: 2 },
-  filterChips: { display: "flex", gap: 2, overflowX: "auto", width: "100%", maxWidth: 720, margin: "0 auto 12px", borderBottom: `1px solid ${C.line}` },
+  filterChips: { position: "sticky", top: "var(--headerH, 56px)", zIndex: 18, display: "flex", gap: 2, overflowX: "auto", width: "100%", maxWidth: 720, margin: "0 auto 12px", background: C.bg, borderBottom: `1px solid ${C.line}` },
   filterChip: { flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderBottom: "3px solid transparent", background: "transparent", padding: "9px 13px 10px", fontSize: 15, fontWeight: 700, color: C.ink3, whiteSpace: "nowrap", cursor: "pointer", borderRadius: 0 },
   filterChipOn: { color: C.ink, borderBottom: `3px solid ${C.accent}` },
   filterChipCount: { fontSize: 12, fontWeight: 700, color: C.ink3 },
@@ -4344,6 +4435,12 @@ const S = {
   taskGroupHead: { display: "flex", alignItems: "center", gap: 9, border: "none", background: "transparent", padding: 0, width: "100%", textAlign: "left" },
   taskGroupTasks: { display: "flex", flexDirection: "column", gap: 4, marginTop: 10, paddingLeft: 30 },
   doneAccordion: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "transparent", color: C.ink2, padding: "10px 4px", fontSize: 13.5, fontWeight: 700, textAlign: "left", cursor: "pointer", width: "100%", marginTop: 4 },
+  plItem: { padding: "9px 2px 10px", borderBottom: `1px solid ${C.line}` },
+  plName: { display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, fontFamily: F.disp, fontWeight: 800, fontSize: 18, letterSpacing: 0.2, cursor: "pointer", padding: 0, lineHeight: 1.25 },
+  plLinks: { display: "flex", flexWrap: "wrap", gap: "4px 12px", marginTop: 5 },
+  plLink: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13.5, color: C.ink2, textDecoration: "none", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  plLinkReply: { color: C.accent, fontWeight: 700 },
+  plEmpty: { color: C.ink3, fontSize: 14, textAlign: "center", padding: "40px 0" },
   doneSection: { marginTop: 16 },
   doneGrid: { display: "flex", flexDirection: "column", gap: 8, marginTop: 4 },
   taskGroupBar: { width: 4, height: 18, borderRadius: 3, flexShrink: 0 },
