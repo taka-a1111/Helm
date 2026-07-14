@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-14t"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-14w"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -581,6 +581,8 @@ export default function App() {
   const [replyFor, setReplyFor] = useState(null); // 返信アシストシートを開いている案件id
   const [undoDel, setUndoDel] = useState(null); // ③ 削除の「元に戻す」トースト { project, index }
   const undoTimer = useRef(null);
+  const [statusPrompt, setStatusPrompt] = useState(null); // 全タスク完了→相手待ち提案 { pid, company }
+  const spTimer = useRef(null);
   const [showSettings, setShowSettings] = useState(false);
   const [editTask, setEditTask] = useState(null); // { pid, tid, focus } サブタスク単体の編集
   // 日付が変わったら（開きっぱなしでも）自動で最新化。編集中は暴発させない
@@ -735,7 +737,7 @@ export default function App() {
         const cur = projectsRef.current || [];
         persist(cur.map((p) => p.id !== target.id ? p : {
           ...p, tsqSeen: cm.id,
-          tsq: t.has && t.title ? { srcId: cm.id, title: String(t.title).slice(0, 40), note: String(t.note || ""), due: /^\d{4}-\d{2}-\d{2}$/.test(t.due || "") ? t.due : "" } : null,
+          tsq: t.has && t.title ? { srcId: cm.id, title: String(t.title).slice(0, 40), note: String(t.note || ""), due: /^\d{4}-\d{2}-\d{2}$/.test(t.due || "") ? t.due : "", urgent: !!t.urgent } : null,
           rsug: (j.reply && String(j.reply).trim() && classifyReplyWeight(cm.body || "") !== "claude") ? { srcId: cm.id, text: String(j.reply).trim() } : null,
         }));
       } catch (e) {
@@ -1105,8 +1107,8 @@ export default function App() {
     }
     setUndoDel(null);
   };
-  const toggleTask = (pid, tid) =>
-    persist(projects.map((p) => p.id !== pid ? p : {
+  const toggleTask = (pid, tid) => {
+    const next = projects.map((p) => p.id !== pid ? p : {
       ...p, tasks: p.tasks.map((t) => {
         if (t.id !== tid) return t;
         // 繰り返しタスク：完了にしたら次回の発生日へ送って未完了のまま継続表示
@@ -1117,7 +1119,23 @@ export default function App() {
         const nowDone = !t.done;
         return { ...t, done: nowDone, doneAt: nowDone ? Date.now() : null };
       }),
-    }));
+    });
+    persist(next);
+    // 最後の未完了タスクを消化 →「相手待ちにしますか？」の提案トースト
+    if (pid !== INBOX_ID) {
+      const op = projects.find((p) => p.id === pid);
+      const np = next.find((p) => p.id === pid);
+      if (op && np && np.status === "進行中") {
+        const before = (op.tasks || []).filter((t) => !t.done).length;
+        const after = (np.tasks || []).filter((t) => !t.done).length;
+        if (before > 0 && after === 0) {
+          setStatusPrompt({ pid, company: np.company || "（無題）" });
+          if (spTimer.current) clearTimeout(spTimer.current);
+          spTimer.current = setTimeout(() => setStatusPrompt(null), 10000);
+        }
+      }
+    }
+  };
   const changeKind = (pid, tid, kind) =>
     persist(projects.map((p) => p.id !== pid ? p : {
       ...p, tasks: p.tasks.map((t) => t.id !== tid ? t : { ...t, kind }),
@@ -1310,7 +1328,7 @@ export default function App() {
         {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
         {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
         {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onClearRsug={clearRsug} />}
-        {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} activeLane={focusFilter} setActiveLane={setFocusFilter} />}
+        {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} activeLane={focusFilter} setActiveLane={setFocusFilter} />}
         {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
       </main>
 
@@ -1356,6 +1374,21 @@ export default function App() {
         <div style={S.undoToast}>
           <span style={S.undoToastText}>「{undoDel.project.company || "（無題）"}」を削除しました</span>
           <button style={S.undoToastBtn} onClick={undoRemove}>元に戻す</button>
+        </div>
+      )}
+
+      {/* ===== 全タスク完了→相手待ち提案トースト ===== */}
+      {statusPrompt && (
+        <div style={{ ...S.undoToast, bottom: undoDel ? 86 : 24 }}>
+          <span style={S.undoToastText}>「{statusPrompt.company}」のタスクが全て完了</span>
+          <button style={S.undoToastBtn}
+            onClick={() => { setProjectStatus(statusPrompt.pid, "相手待ち"); setStatusPrompt(null); if (spTimer.current) clearTimeout(spTimer.current); }}>
+            相手待ちにする
+          </button>
+          <button style={S.suggestX}
+            onClick={() => { setStatusPrompt(null); if (spTimer.current) clearTimeout(spTimer.current); }}>
+            <X size={13} strokeWidth={2.2} />
+          </button>
         </div>
       )}
 
@@ -2298,7 +2331,7 @@ function InboxPanel() {
   );
 }
 
-function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderProject, onSortManual, onReorderCommit, onToggleProject, activeLane, setActiveLane, singleLane }) {
+function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderProject, onSortManual, onReorderCommit, onToggleProject, onSetStatus, activeLane, setActiveLane, singleLane }) {
   const wide = useWideScreen();
   const [adding, setAdding] = useState(null); // 追加中のレーンキー（null=なし）
   const [openDone, setOpenDone] = useState(() => new Set()); // アコーディオンで完了を開いているレーン
@@ -2429,6 +2462,17 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
       <GroupHead project={g.project} lane={lane}
         dragActive={dragTid !== null || dragGid !== null}
         onStartDrag={startGroupDrag} onOpen={onOpen} onToggleProject={onToggleProject} />
+      {(lane === "waiting" || lane === "payment") && dragTid === null && dragGid === null && (() => {
+        const sug = statusSuggestion(g.project);
+        if (!sug || sug.mark !== "warn" || !sug.suggest) return null;
+        return (
+          <div style={{ ...S.suggestBar, marginTop: 4, marginBottom: 6 }}>
+            <AlertTriangle size={13} color="#D9A23B" strokeWidth={2.4} style={{ flexShrink: 0 }} />
+            <span style={S.suggestText}>{sug.reason} →「{sug.suggest}」では？</span>
+            <button style={S.suggestBtn} onClick={() => onSetStatus && onSetStatus(g.project.id, sug.suggest)}>{sug.suggest}にする</button>
+          </div>
+        );
+      })()}
       {g.tasks.length > 0 && (
       <div style={S.taskGroupTasks}>
         {g.tasks.map((t) => (
@@ -3320,11 +3364,16 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
               </div>
               <div style={S.tsqTitle}>{d.tsq.title}</div>
               {d.tsq.note && <div style={S.tsqNote}>{d.tsq.note}</div>}
-              {d.tsq.due && <div style={S.tsqDueTx}>期限候補：{d.tsq.due.slice(5).replace("-", "/")}</div>}
+              <div style={S.tsqDueTx}>
+                いつやる：{d.tsq.urgent ? "今日（緊急）" : "明日"}
+                {d.tsq.due ? `／期限：${d.tsq.due.slice(5).replace("-", "/")}` : ""}
+              </div>
               <div style={S.tsqBtns}>
                 <button style={S.tsqAdd} onClick={() => {
                   const t = task(d.tsq.title, null);
-                  t.note = d.tsq.note || ""; t.due = d.tsq.due || dStr(1); // 期限が無ければ明日
+                  t.note = d.tsq.note || "";
+                  t.due = d.tsq.due || "";                       // 期限：メッセージに明記があった場合のみ
+                  t.start = d.tsq.urgent ? dStr(0) : dStr(1);    // いつやる：緊急=今日、通常=明日
                   setD((p) => ({ ...p, tasks: [...p.tasks, t], tsq: null }));
                 }}>タスクに追加</button>
                 <button style={S.tsqIgnore} onClick={() => set("tsq", null)}>無視</button>
@@ -4601,7 +4650,7 @@ const driveFolderLinkOf = (p) => ((p && p.links) || []).find((l) => /drive\.goog
 // --- ログの新着（相手の最新メッセージ）から依頼を検出しタスク候補を作る（Sonnet・承認制） ---
 // 粒度ルール：報告タイミングが同じものは1件にまとめ、内訳は詳細(note)へ。1メッセージから原則1件。
 async function analyzeIncomingMsg(companyName, recentLog) {
-  const sys = 'あなたはフリーランス（高崎・屋号インフォサクセス）の案件管理アシスタントです。クライアントとの直近のやり取りログを読み、(1)いま残っている宿題のタスク化 (2)返信文の下書き を作り、JSONだけを出力します。説明やコードブロック記法は付けないこと。\n{"task":{"has":true|false,"title":"タスク名（25字以内。報告タイミングが同じ複数の指示は1件にまとめた名前にする）","note":"内訳の箇条書き（各行を・で始め改行区切り。※既に完了報告済みの項目は含めない。内訳が1つだけ・不要なら空文字）","due":"YYYY-MM-DD"},"reply":"返信文の下書き。空文字の条件は後述"}\nタスク判定基準（重要）：ログ全体を時系列で読み、相手からの依頼のうち「その後に自分（高崎）が完了・提出・送付・反映済みと報告していないもの」だけをタスク化する。全て対応済みならhas:false。挨拶・お礼・進捗確認・支払い連絡のみもhas:false。\n期限(due)の規則：メッセージに期限・締切が明記されていればその日付。明記がなければ、至急・本日中・今日中など緊急性が高い場合は今日、通常は明日を入れる（has:trueなら必ず日付を入れる）。今日は' + dStr(0) + '、明日は' + dStr(1) + '。\n返信(reply)の規則：ログの最後の発言が相手で、自分がまだ返信していない場合のみ下書きを作る。最後の発言が自分（返信済み）の場合や、返信不要な自動通知のみの場合は空文字。文体はログ内の自分の返信と同じトーン・改行リズムを厳密に守る（「お世話になっております。」で始め「引き続きよろしくお願いいたします。」等で締める）。依頼への承諾・要点の復唱を簡潔に。自分の最後の返信より後に相手から複数のメッセージが届いている場合は、その全メッセージに1通でまとめて返信する（各メッセージの内容に漏れなく応答する）。金額・条件など判断が必要な点は断定せず「確認のうえ改めてご連絡いたします」とする。事実の捏造禁止。';
+  const sys = 'あなたはフリーランス（高崎・屋号インフォサクセス）の案件管理アシスタントです。クライアントとの直近のやり取りログを読み、(1)いま残っている宿題のタスク化 (2)返信文の下書き を作り、JSONだけを出力します。説明やコードブロック記法は付けないこと。\n{"task":{"has":true|false,"title":"タスク名（25字以内。報告タイミングが同じ複数の指示は1件にまとめた名前にする）","note":"内訳の箇条書き（各行を・で始め改行区切り。※既に完了報告済みの項目は含めない。内訳が1つだけ・不要なら空文字）","due":"YYYY-MM-DD（メッセージに期限・締切が明記されている場合のみ。無ければ空文字）","urgent":true|false},"reply":"返信文の下書き。空文字の条件は後述"}\nタスク判定基準（重要）：ログ全体を時系列で読み、相手からの依頼のうち「その後に自分（高崎）が完了・提出・送付・反映済みと報告していないもの」だけをタスク化する。全て対応済みならhas:false。挨拶・お礼・進捗確認・支払い連絡のみもhas:false。\nurgentの規則：至急・本日中・今日中・ASAPなど緊急性が高い表現があればtrue、通常はfalse。今日は' + dStr(0) + '。\n返信(reply)の規則：ログの最後の発言が相手で、自分がまだ返信していない場合のみ下書きを作る。最後の発言が自分（返信済み）の場合や、返信不要な自動通知のみの場合は空文字。文体はログ内の自分の返信と同じトーン・改行リズムを厳密に守る（「お世話になっております。」で始め「引き続きよろしくお願いいたします。」等で締める）。依頼への承諾・要点の復唱を簡潔に。自分の最後の返信より後に相手から複数のメッセージが届いている場合は、その全メッセージに1通でまとめて返信する（各メッセージの内容に漏れなく応答する）。金額・条件など判断が必要な点は断定せず「確認のうえ改めてご連絡いたします」とする。事実の捏造禁止。';
   const out = await callClaude({ system: sys, user: `案件「${companyName || ""}」の直近のやり取り（時系列）:\n\n${recentLog}`, maxTokens: 900 });
   const clean = out.replace(/```json|```/g, "").trim();
   const j = JSON.parse(clean);
