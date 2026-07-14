@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-14m"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-14o"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -578,6 +578,7 @@ export default function App() {
   const [focusTaskId, setFocusTaskId] = useState(null); // タスクから開いたとき、上部に表示するタスクID
   const openProjectTask = (project, taskId) => { setFocusTaskId(taskId || null); setEditing(project); };
   const [confirmDel, setConfirmDel] = useState(null);
+  const [replyFor, setReplyFor] = useState(null); // 返信アシストシートを開いている案件id
   const [undoDel, setUndoDel] = useState(null); // ③ 削除の「元に戻す」トースト { project, index }
   const undoTimer = useRef(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -602,10 +603,11 @@ export default function App() {
     persist(projects.map((p) => p.id !== pid ? p : { ...p, tasks: p.tasks.filter((t) => t.id !== tid) }));
 
   // 開いているオーバーレイ／画面を1つ閉じる（実体）。閉じたら true
-  const depth = (editing ? 1 : 0) + (showSettings ? 1 : 0) + (editTask ? 1 : 0) + (shareIntent ? 1 : 0) + (showSearch ? 1 : 0) + navStack.length;
+  const depth = (editing ? 1 : 0) + (showSettings ? 1 : 0) + (editTask ? 1 : 0) + (shareIntent ? 1 : 0) + (showSearch ? 1 : 0) + (replyFor ? 1 : 0) + navStack.length;
   const depthRef = useRef(0); depthRef.current = depth;
   const closeOneRef = useRef(() => false);
   closeOneRef.current = () => {
+    if (replyFor) { setReplyFor(null); return true; }
     if (showSearch) { setShowSearch(false); return true; }
     if (shareIntent) { setShareIntent(null); return true; }
     if (editTask) { setEditTask(null); return true; }
@@ -1130,25 +1132,10 @@ export default function App() {
   // カードから返信案を消す／その場で生成する
   const clearRsug = (pid) =>
     persist((projectsRef.current || []).map((p) => p.id !== pid ? p : { ...p, rsug: null }));
-  const genReply = async (pid) => {
-    try {
-      const p = (projectsRef.current || []).find((x) => x.id === pid);
-      if (!p || !(p.msgs || []).length) return "error";
-      const cm = [...(p.msgs || [])].reverse().find((m) => m.who === "client" && m.id);
-      const recentLog = (p.msgs || []).slice(-12)
-        .map((m) => `[${fmtLogAt(m.at)}] ${m.who === "me" ? "自分" : (m.name || "相手")}：${(m.body || "").slice(0, 600)}`)
-        .join("\n\n");
-      const j = await analyzeIncomingMsg(p.company, recentLog);
-      const t = j.task || {};
-      const hasReply = j.reply && String(j.reply).trim();
-      persist((projectsRef.current || []).map((x) => x.id !== pid ? x : {
-        ...x,
-        tsqSeen: cm ? cm.id : x.tsqSeen,
-        rsug: hasReply ? { srcId: cm ? cm.id : "", text: String(j.reply).trim() } : x.rsug,
-        tsq: x.tsq || (t.has && t.title ? { srcId: cm ? cm.id : "", title: String(t.title).slice(0, 40), note: String(t.note || ""), due: /^\d{4}-\d{2}-\d{2}$/.test(t.due || "") ? t.due : "" } : null),
-      }));
-      return hasReply ? "ok" : "empty";
-    } catch { return "error"; }
+  const saveRsug = (pid, text) => {
+    const p = (projectsRef.current || []).find((x) => x.id === pid);
+    const cm = p ? [...(p.msgs || [])].reverse().find((m) => m.who === "client" && m.id) : null;
+    persist((projectsRef.current || []).map((x) => x.id !== pid ? x : { ...x, rsug: { srcId: cm ? cm.id : "", text } }));
   };
   const changeLane = (pid, tid, lane) => {
     if (lane === "waiting" || lane === "payment") {
@@ -1313,7 +1300,7 @@ export default function App() {
       <main style={S.main} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
         {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
         {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
-        {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onGenReply={genReply} onClearRsug={clearRsug} />}
+        {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onClearRsug={clearRsug} />}
         {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} activeLane={focusFilter} setActiveLane={setFocusFilter} />}
         {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
       </main>
@@ -1362,8 +1349,15 @@ export default function App() {
         </div>
       )}
 
+      {/* ===== 返信アシストシート ===== */}
+      {replyFor && (() => {
+        const p = projects.find((x) => x.id === replyFor);
+        if (!p) return null;
+        return <ReplySheet project={p} onClose={goBack} onSaveRsug={saveRsug} />;
+      })()}
+
       {/* ===== 右下フローティング＋ボタン（Googleカレンダー方式） ===== */}
-      {!editing && !showSettings && !confirmDel && !editTask && (
+      {!editing && !showSettings && !confirmDel && !editTask && !replyFor && (
         <button style={S.fab} onClick={() => setEditing(blankDraft())} title="案件を追加" aria-label="案件を追加">
           <Plus size={26} strokeWidth={2.6} />
         </button>
@@ -1375,7 +1369,7 @@ export default function App() {
 /* ============================================================
    フォーカス（ダッシュボード）
    ============================================================ */
-function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onToggleProject, onReorderTask, onMoveTask, sortMode, setSortMode, onSetStatus, onGenReply, onClearRsug }) {
+function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onToggleProject, onReorderTask, onMoveTask, sortMode, setSortMode, onSetStatus, onOpenReply, onClearRsug }) {
   const [openCard, setOpenCard] = useState(null);
   const [openMsg, setOpenMsg] = useState(null);
 
@@ -1675,7 +1669,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
                           <span style={{ ...S.focusGroupCount, color: g.color }}>{g.items.length}</span>
                         </div>
                       )}
-                      {g.items.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onUpdateTask={onUpdateTask} onEditTask={onEditTask} onToggleTask={onToggleTask} onToggleProject={onToggleProject} onDragHandle={startDrag} dragging={dragId === p.id} dragActive={dragId !== null} onTaskDrag={startTaskDrag} taskDragId={dragTaskId} onSetStatus={onSetStatus} onGenReply={onGenReply} onClearRsug={onClearRsug} />)}
+                      {g.items.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onUpdateTask={onUpdateTask} onEditTask={onEditTask} onToggleTask={onToggleTask} onToggleProject={onToggleProject} onDragHandle={startDrag} dragging={dragId === p.id} dragActive={dragId !== null} onTaskDrag={startTaskDrag} taskDragId={dragTaskId} onSetStatus={onSetStatus} onOpenReply={onOpenReply} onClearRsug={onClearRsug} />)}
                     </React.Fragment>
                   );
                 });
@@ -1782,17 +1776,13 @@ function ProjectsView({ projects, onOpen }) {
   );
 }
 
-function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onToggleTask, onToggleProject, onDragHandle, dragging, dragActive, onTaskDrag, taskDragId, onSetStatus, onGenReply, onClearRsug }) {
+function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onToggleTask, onToggleProject, onDragHandle, dragging, dragActive, onTaskDrag, taskDragId, onSetStatus, onOpenReply, onClearRsug }) {
   // ステータスの確信度（✓一致／?不明／⚠矛盾）と提案バー
   const sug = statusSuggestion(p);
   const [sugDismiss, setSugDismiss] = useState(false);
   // カード上の返信アシスト
-  const [rsugFull, setRsugFull] = useState(false);
   const [rsugCopied, setRsugCopied] = useState(false);
-  const [genBusy, setGenBusy] = useState(false);
-  const [genMsg, setGenMsg] = useState("");
-  const lastMsg = (p.msgs || [])[(p.msgs || []).length - 1];
-  const lastIsClient = !!(lastMsg && lastMsg.who === "client");
+  const hasClientMsg = (p.msgs || []).some((m) => m.who === "client");
   // タスク行の長押し（300ms）でドラッグ開始
   const tLp = useRef(null); const tDown = useRef(null);
   const tRowDown = (e, tid) => {
@@ -1901,32 +1891,19 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
         </div>
       )}
       {!dragActive && p.rsug && (
-        <div style={S.cardRsug} onPointerDown={stop} onClick={stop}>
+        <div style={S.cardRsug} onPointerDown={stop} onClick={(e) => { stop(e); onOpenReply && onOpenReply(p.id); }} title="タップで返信アシストを開く">
           <Reply size={13} color={C.accent} strokeWidth={2.4} style={{ flexShrink: 0, marginTop: 3 }} />
-          <span style={{ ...S.cardRsugText, ...(rsugFull ? {} : S.cardRsugClamp) }}
-            onClick={(e) => { stop(e); setRsugFull((v) => !v); }}
-            title={rsugFull ? "タップで折りたたむ" : "タップで全文表示"}>{p.rsug.text}</span>
+          <span style={{ ...S.cardRsugText, ...S.cardRsugClamp }}>{p.rsug.text}</span>
           <button style={S.cardRsugCopy} onClick={async (e) => { stop(e); const ok = await copyText(p.rsug.text); if (ok) { setRsugCopied(true); setTimeout(() => setRsugCopied(false), 1500); } }}>
             {rsugCopied ? <Check size={12} strokeWidth={2.8} /> : <Copy size={12} strokeWidth={2.2} />}{rsugCopied ? "OK" : "コピー"}
           </button>
-          <button style={S.suggestX} onClick={(e) => { stop(e); onClearRsug && onClearRsug(p.id); }} title="返信案を消す"><X size={12} strokeWidth={2.2} /></button>
         </div>
       )}
-      {!dragActive && !p.rsug && lastIsClient && (
+      {!dragActive && !p.rsug && hasClientMsg && (
         <div onPointerDown={stop} onClick={stop}>
-          <button style={S.cardRsugGen} disabled={genBusy}
-            onClick={async (e) => {
-              stop(e); if (genBusy || !onGenReply) return;
-              setGenBusy(true); setGenMsg("");
-              try {
-                const r = await onGenReply(p.id);
-                if (r === "empty") setGenMsg("返信は不要と判断されました");
-                if (r === "error") setGenMsg("生成に失敗しました（APIキー・通信を確認）");
-              } finally { setGenBusy(false); }
-            }}>
-            <Reply size={13} strokeWidth={2.4} />{genBusy ? "生成中…" : "返信案を生成"}
+          <button style={S.cardRsugGen} onClick={(e) => { stop(e); onOpenReply && onOpenReply(p.id); }}>
+            <Reply size={13} strokeWidth={2.4} />返信アシスト
           </button>
-          {genMsg && <div style={S.cardRsugMsg}>{genMsg}</div>}
         </div>
       )}
       {!dragActive && showTasks.length > 0 && (
@@ -2684,6 +2661,104 @@ function AddTaskInline({ projects, onAdd, onCancel }) {
 /* ============================================================
    詳細・編集ドロワー
    ============================================================ */
+// ==================== 返信アシストシート ====================
+// 直近のメッセージ＋返信候補＋コピー。候補が無ければ開いた瞬間に強制生成。
+function ReplySheet({ project, onClose, onSaveRsug }) {
+  const wide = useWideScreen();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [copied, setCopied] = useState(false);
+  const autoCopied = useRef(false);
+  const text = project.rsug ? project.rsug.text : "";
+  const genSeq = useRef(0);
+  const gen = async () => {
+    if (busy) return;
+    genSeq.current++;
+    setBusy(true); setErr("");
+    try {
+      const draft = await forceReplyDraft(project);
+      if (draft) { autoCopied.current = false; onSaveRsug(project.id, draft); }
+      else setErr("返信案を生成できませんでした。もう一度お試しください");
+    } catch (e) {
+      setErr(/API 401|API 403/.test(String(e && e.message)) ? "APIキーが無効です。設定を確認してください" : "生成に失敗しました（通信を確認して再試行）");
+    }
+    setBusy(false);
+  };
+  useEffect(() => { if (!text) gen(); }, []);
+  // 生成が済んだら自動コピー（開いた時点で候補があればそれも自動コピー）
+  const [autoNote, setAutoNote] = useState("");
+  useEffect(() => {
+    if (text && !busy && !autoCopied.current) {
+      autoCopied.current = true;
+      copyText(text).then((ok) => {
+        if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2000); setAutoNote("返信文をコピーしました。リンク先を開いて貼り付けてください"); }
+        else setAutoNote("自動コピーできませんでした。コピーボタンを押してください");
+      });
+    }
+  }, [text, busy]);
+  const doCopy = async () => {
+    if (!text) return;
+    const ok = await copyText(text);
+    if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1600); }
+  };
+  // 直近表示：自分の最後の返信以降の相手メッセージを全部（＋直前の文脈少し）
+  const allMsgs = project.msgs || [];
+  let lastMe = -1;
+  for (let i = allMsgs.length - 1; i >= 0; i--) { if (allMsgs[i].who === "me") { lastMe = i; break; } }
+  const start = Math.max(0, Math.min(lastMe >= 0 ? lastMe : allMsgs.length - 4, allMsgs.length - 4));
+  const recent = allMsgs.slice(start);
+  const rlink = replyLinkOf(project);
+  const rlinkLabel = (() => { if (!rlink) return ""; try { const li = linkInfo(rlink.url); return (li && li.label) || "リンクを開く"; } catch { return "リンクを開く"; } })();
+  return (
+    <>
+      <div style={S.scrim} onClick={onClose} />
+      <div style={wide ? S.taskDrawer : S.taskSheet}>
+        <div style={S.drawerHead}>
+          <span style={S.drawerGrip} />
+          <span style={S.drawerTitle}>返信アシスト — {project.company || "（無題）"}</span>
+          <button style={S.iconBtn} onClick={onClose}><X size={18} /></button>
+        </div>
+        <div style={S.rshBody}>
+          <div style={S.rshLabel}>直近のメッセージ</div>
+          {recent.length === 0 && <div style={S.rshEmpty}>ログがありません。やり取りを貼り付けるかChatworkリンクを登録してください</div>}
+          {recent.map((m) => (
+            <div key={m.id} style={{ ...S.logItem, ...(m.who === "me" ? S.logItemMe : {}) }}>
+              <div style={S.logMeta}>
+                <span>{m.who === "me" ? "自分" : (m.name || "相手")}</span>
+                <span>{fmtLogAt(m.at)}</span>
+              </div>
+              <div style={S.logBody}>{m.body}</div>
+            </div>
+          ))}
+          <div style={{ ...S.rshLabel, marginTop: 12 }}>返信候補</div>
+          {busy && <div style={S.rshEmpty}>生成中…</div>}
+          {!busy && err && <div style={{ ...S.rshEmpty, color: "#FF8A8A" }}>{err}</div>}
+          {!busy && !err && text && (
+            <>
+              <div style={S.rshDraft}>{text}</div>
+              {autoNote && <div style={S.rshNote}>{autoNote}</div>}
+            </>
+          )}
+        </div>
+        <div style={S.drawerFoot}>
+          <button style={S.rshRegen} onClick={gen} disabled={busy}>
+            <Repeat size={14} strokeWidth={2.4} />{busy ? "生成中…" : "作り直す"}
+          </button>
+          <div style={{ flex: 1 }} />
+          <button style={S.rshCopyBtn} onClick={doCopy} disabled={!text || busy}>
+            {copied ? <><Check size={15} strokeWidth={2.8} />コピー済</> : <><Copy size={15} strokeWidth={2.2} />コピー</>}
+          </button>
+          {rlink && (
+            <a style={S.rshOpenBtn} href={rlink.url} target="_blank" rel="noopener noreferrer" title={rlink.url}>
+              <ExternalLink size={14} strokeWidth={2.4} />{rlinkLabel}
+            </a>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // AI返信案の表示（コピー・閉じる）
 function RsugBox({ text, onDismiss }) {
   const [copied, setCopied] = useState(false);
@@ -4481,12 +4556,32 @@ const driveFolderLinkOf = (p) => ((p && p.links) || []).find((l) => /drive\.goog
 // --- ログの新着（相手の最新メッセージ）から依頼を検出しタスク候補を作る（Sonnet・承認制） ---
 // 粒度ルール：報告タイミングが同じものは1件にまとめ、内訳は詳細(note)へ。1メッセージから原則1件。
 async function analyzeIncomingMsg(companyName, recentLog) {
-  const sys = 'あなたはフリーランス（高崎・屋号インフォサクセス）の案件管理アシスタントです。クライアントとの直近のやり取りログを読み、(1)いま残っている宿題のタスク化 (2)返信文の下書き を作り、JSONだけを出力します。説明やコードブロック記法は付けないこと。\n{"task":{"has":true|false,"title":"タスク名（25字以内。報告タイミングが同じ複数の指示は1件にまとめた名前にする）","note":"内訳の箇条書き（各行を・で始め改行区切り。※既に完了報告済みの項目は含めない。内訳が1つだけ・不要なら空文字）","due":"YYYY-MM-DD"},"reply":"返信文の下書き。空文字の条件は後述"}\nタスク判定基準（重要）：ログ全体を時系列で読み、相手からの依頼のうち「その後に自分（高崎）が完了・提出・送付・反映済みと報告していないもの」だけをタスク化する。全て対応済みならhas:false。挨拶・お礼・進捗確認・支払い連絡のみもhas:false。\n期限(due)の規則：メッセージに期限・締切が明記されていればその日付。明記がなければ、至急・本日中・今日中など緊急性が高い場合は今日、通常は明日を入れる（has:trueなら必ず日付を入れる）。今日は' + dStr(0) + '、明日は' + dStr(1) + '。\n返信(reply)の規則：ログの最後の発言が相手で、自分がまだ返信していない場合のみ下書きを作る。最後の発言が自分（返信済み）の場合や、返信不要な自動通知のみの場合は空文字。文体はログ内の自分の返信と同じトーン・改行リズムを厳密に守る（「お世話になっております。」で始め「引き続きよろしくお願いいたします。」等で締める）。依頼への承諾・要点の復唱を簡潔に。金額・条件など判断が必要な点は断定せず「確認のうえ改めてご連絡いたします」とする。事実の捏造禁止。';
+  const sys = 'あなたはフリーランス（高崎・屋号インフォサクセス）の案件管理アシスタントです。クライアントとの直近のやり取りログを読み、(1)いま残っている宿題のタスク化 (2)返信文の下書き を作り、JSONだけを出力します。説明やコードブロック記法は付けないこと。\n{"task":{"has":true|false,"title":"タスク名（25字以内。報告タイミングが同じ複数の指示は1件にまとめた名前にする）","note":"内訳の箇条書き（各行を・で始め改行区切り。※既に完了報告済みの項目は含めない。内訳が1つだけ・不要なら空文字）","due":"YYYY-MM-DD"},"reply":"返信文の下書き。空文字の条件は後述"}\nタスク判定基準（重要）：ログ全体を時系列で読み、相手からの依頼のうち「その後に自分（高崎）が完了・提出・送付・反映済みと報告していないもの」だけをタスク化する。全て対応済みならhas:false。挨拶・お礼・進捗確認・支払い連絡のみもhas:false。\n期限(due)の規則：メッセージに期限・締切が明記されていればその日付。明記がなければ、至急・本日中・今日中など緊急性が高い場合は今日、通常は明日を入れる（has:trueなら必ず日付を入れる）。今日は' + dStr(0) + '、明日は' + dStr(1) + '。\n返信(reply)の規則：ログの最後の発言が相手で、自分がまだ返信していない場合のみ下書きを作る。最後の発言が自分（返信済み）の場合や、返信不要な自動通知のみの場合は空文字。文体はログ内の自分の返信と同じトーン・改行リズムを厳密に守る（「お世話になっております。」で始め「引き続きよろしくお願いいたします。」等で締める）。依頼への承諾・要点の復唱を簡潔に。自分の最後の返信より後に相手から複数のメッセージが届いている場合は、その全メッセージに1通でまとめて返信する（各メッセージの内容に漏れなく応答する）。金額・条件など判断が必要な点は断定せず「確認のうえ改めてご連絡いたします」とする。事実の捏造禁止。';
   const out = await callClaude({ system: sys, user: `案件「${companyName || ""}」の直近のやり取り（時系列）:\n\n${recentLog}`, maxTokens: 900 });
   const clean = out.replace(/```json|```/g, "").trim();
   const j = JSON.parse(clean);
   if (!j || !j.task || typeof j.task.has !== "boolean") throw new Error("bad json");
   return j;
+}
+
+// 返信先リンク：返信用(kind:reply)→Chatwork→CW/ランサーズ→最初のリンク の優先順
+const replyLinkOf = (p) => {
+  const ls = ((p && p.links) || []).filter((l) => l.url);
+  return ls.find((l) => l.kind === "reply")
+    || ls.find((l) => /chatwork\.com/.test(l.url))
+    || ls.find((l) => /crowdworks\.jp|lancers\.jp/.test(l.url))
+    || ls[0] || null;
+};
+
+// 返信シート用：必ず返信文を生成する（「不要」判定はしない）
+async function forceReplyDraft(project) {
+  const recentLog = (project.msgs || []).slice(-12)
+    .map((m) => `[${fmtLogAt(m.at)}] ${m.who === "me" ? "自分" : (m.name || "相手")}：${(m.body || "").slice(0, 600)}`)
+    .join("\n\n");
+  const sys = 'あなたはフリーランス（高崎・屋号インフォサクセス）の返信作成アシスタントです。クライアントとの直近のやり取りログを読み、相手の最新メッセージへの返信文の下書きを作り、JSONだけを出力します。説明やコードブロック記法は付けないこと。\n{"reply":"返信文"}\n規則：必ず返信文を作る（内容が薄くても、お礼・確認・承知の返信を作る）。文体はログ内の自分の返信と同じトーン・改行リズムを厳密に守る（「お世話になっております。」で始め「引き続きよろしくお願いいたします。」等で締める）。依頼への承諾・要点の復唱を簡潔に。自分の最後の返信より後に相手から複数のメッセージが届いている場合は、その全メッセージに対して1通でまとめて返信する（各メッセージの内容に漏れなく応答する）。金額・条件など判断が必要な点は断定せず「確認のうえ改めてご連絡いたします」とする。事実の捏造禁止。今日は' + dStr(0) + '。';
+  const out = await callClaude({ system: sys, user: `案件「${project.company || ""}」の直近のやり取り（時系列）:\n\n${recentLog}`, maxTokens: 800 });
+  const j = JSON.parse(out.replace(/```json|```/g, "").trim());
+  return String((j && j.reply) || "").trim();
 }
 
 async function copyText(text) {
@@ -5341,6 +5436,14 @@ const S = {
   cardRsugCopy: { flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4, border: "none", borderRadius: 8, background: "rgba(107,138,255,0.18)", color: C.accent, fontWeight: 800, fontSize: 12, padding: "5px 10px", cursor: "pointer" },
   cardRsugGen: { display: "inline-flex", alignItems: "center", gap: 5, marginTop: 9, border: "none", borderRadius: 8, background: "rgba(107,138,255,0.10)", color: C.accent, fontWeight: 700, fontSize: 12.5, padding: "6px 11px", cursor: "pointer" },
   cardRsugMsg: { marginTop: 5, fontSize: 12, color: C.ink3 },
+  rshBody: { flex: 1, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 },
+  rshLabel: { fontSize: 12, fontWeight: 700, color: C.ink3, letterSpacing: 0.3 },
+  rshEmpty: { fontSize: 13.5, color: C.ink3, padding: "10px 2px" },
+  rshDraft: { fontSize: 14.5, color: C.ink, whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.65, padding: "11px 13px", borderRadius: 11, background: "rgba(107,138,255,0.10)", border: "1px solid rgba(107,138,255,0.45)" },
+  rshRegen: { display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: 9, background: C.panel2, color: C.ink2, fontWeight: 700, fontSize: 13.5, padding: "9px 13px", cursor: "pointer" },
+  rshCopyBtn: { display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: 9, background: C.accent, color: "#0F1318", fontWeight: 800, fontSize: 14, padding: "10px 18px", cursor: "pointer" },
+  rshOpenBtn: { display: "inline-flex", alignItems: "center", gap: 6, marginLeft: 8, borderRadius: 9, background: "rgba(107,138,255,0.16)", color: C.accent, fontWeight: 800, fontSize: 14, padding: "10px 14px", textDecoration: "none" },
+  rshNote: { fontSize: 12.5, color: "#51CF66", fontWeight: 600 },
   rsugBox: { display: "flex", flexDirection: "column", gap: 6, margin: "2px 0 14px 0", padding: "11px 13px", borderRadius: 11, background: "rgba(107,138,255,0.10)", border: "1px solid rgba(107,138,255,0.45)" },
   rsugHead: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: C.accent },
   rsugCopy: { marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, border: "none", borderRadius: 8, background: "rgba(107,138,255,0.16)", color: C.accent, fontWeight: 800, fontSize: 12.5, padding: "6px 11px", cursor: "pointer", flexShrink: 0 },
