@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-14k"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-14l"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -724,8 +724,10 @@ export default function App() {
       const cm = [...(target.msgs || [])].reverse().find((m) => m.who === "client" && m.id);
       tsqBusy.current = true;
       try {
-        const myReplies = (target.msgs || []).filter((m) => m.who === "me").map((m) => m.body);
-        const j = await analyzeIncomingMsg(target.company, cm.body || "", myReplies);
+        const recentLog = (target.msgs || []).slice(-12)
+          .map((m) => `[${fmtLogAt(m.at)}] ${m.who === "me" ? "自分" : (m.name || "相手")}：${(m.body || "").slice(0, 600)}`)
+          .join("\n\n");
+        const j = await analyzeIncomingMsg(target.company, recentLog);
         if (editingRef2.current) return; // 解析中に編集が始まったら破棄（次回やり直し）
         const t = j.task || {};
         const cur = projectsRef.current || [];
@@ -1830,8 +1832,8 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
             {sug && sug.mark === "ok" && <Check size={13} color="#51CF66" strokeWidth={3} style={{ flexShrink: 0 }} />}
             {sug && sug.mark === "warn" && <AlertTriangle size={13} color="#D9A23B" strokeWidth={2.6} style={{ flexShrink: 0 }} />}
             {sug && sug.mark === "unknown" && <span style={S.trustUnknown} title="ログ未登録または古いため判定できません">?</span>}
+            {p.rsug && <span style={S.aiPillBlue} title="AIが返信案を用意しています（開いて確認）"><Reply size={11} strokeWidth={2.6} />返信案</span>}
             {p.tsq && <span style={S.aiPill} title="AIがタスク候補を用意しています（開いて確認）"><ListPlus size={11} strokeWidth={2.6} />タスク候補</span>}
-            {!p.tsq && p.rsug && <span style={S.aiPill} title="AIが返信案を用意しています（開いて確認）"><Reply size={11} strokeWidth={2.6} />返信案</span>}
           </span>
           {!dragActive && (st || dl) && (
             <span style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
@@ -3140,18 +3142,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
             </select>
           </div>
 
-          {/* ===== リンク（Claude / GitHub / 公開URL など） ===== */}
-          <div style={S.linkSectionRow}>
-            <Link2 size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
-            <LinksField links={d.links} onChange={(v) => set("links", v)} />
-          </div>
-
-          {/* ===== やり取りログ ===== */}
-          {!isNew && d.id !== INBOX_ID && (
-            <LogSection d={d} onChange={(v) => set("msgs", v)} />
-          )}
-
-          {/* ===== AI返信案 ===== */}
+          {/* ===== AI返信案（最優先で表示：返信を逃さない） ===== */}
           {!isNew && d.rsug && (
             <RsugBox text={d.rsug.text} onDismiss={() => set("rsug", null)} />
           )}
@@ -3169,12 +3160,23 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
               <div style={S.tsqBtns}>
                 <button style={S.tsqAdd} onClick={() => {
                   const t = task(d.tsq.title, null);
-                  t.note = d.tsq.note || ""; t.due = d.tsq.due || "";
+                  t.note = d.tsq.note || ""; t.due = d.tsq.due || dStr(1); // 期限が無ければ明日
                   setD((p) => ({ ...p, tasks: [...p.tasks, t], tsq: null }));
                 }}>タスクに追加</button>
                 <button style={S.tsqIgnore} onClick={() => set("tsq", null)}>無視</button>
               </div>
             </div>
+          )}
+
+          {/* ===== リンク（Claude / GitHub / 公開URL など） ===== */}
+          <div style={S.linkSectionRow}>
+            <Link2 size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
+            <LinksField links={d.links} onChange={(v) => set("links", v)} />
+          </div>
+
+          {/* ===== やり取りログ ===== */}
+          {!isNew && d.id !== INBOX_ID && (
+            <LogSection d={d} onChange={(v) => set("msgs", v)} />
           )}
 
           {/* ===== tasks ===== */}
@@ -4420,10 +4422,9 @@ const driveFolderLinkOf = (p) => ((p && p.links) || []).find((l) => /drive\.goog
 
 // --- ログの新着（相手の最新メッセージ）から依頼を検出しタスク候補を作る（Sonnet・承認制） ---
 // 粒度ルール：報告タイミングが同じものは1件にまとめ、内訳は詳細(note)へ。1メッセージから原則1件。
-async function analyzeIncomingMsg(companyName, body, myRecentReplies) {
-  const sys = 'あなたはフリーランス（高崎・屋号インフォサクセス）の案件管理アシスタントです。クライアントからのメッセージを読み、(1)対応すべき依頼のタスク化 (2)返信文の下書き を作り、JSONだけを出力します。説明やコードブロック記法は付けないこと。\n{"task":{"has":true|false,"title":"タスク名（25字以内。報告タイミングが同じ複数の指示は1件にまとめた名前にする）","note":"内訳の箇条書き（各行を・で始め改行区切り。内訳が1つだけ・不要なら空文字）","due":"YYYY-MM-DD（期限・締切が明記されている場合のみ。無ければ空文字）"},"reply":"返信文の下書き。返信が不要な内容（自動通知・事務連絡のみ等）なら空文字"}\nタスク判定基準：修正依頼・作成依頼・提出依頼・確認作業の依頼はhas:true。挨拶・お礼・進捗確認・支払い連絡・雑談のみはhas:false。\n返信の規則：与えられた過去の返信例と同じ文体・トーン・改行リズムを厳密に守る（「お世話になっております。」で始め「引き続きよろしくお願いいたします。」等で締める）。依頼への承諾・要点の復唱を簡潔に。金額・条件など判断が必要な点は断定せず「確認のうえ改めてご連絡いたします」とする。事実の捏造禁止。今日は' + dStr(0) + '。';
-  const examples = (myRecentReplies || []).slice(-2).map((s) => s.slice(0, 600)).join("\n----\n");
-  const out = await callClaude({ system: sys, user: `案件「${companyName || ""}」\n\n【過去の自分の返信例（文体見本）】\n${examples || "（例なし。丁寧なビジネス文体で）"}\n\n【クライアントからの新着メッセージ】\n${body.slice(0, 4000)}`, maxTokens: 900 });
+async function analyzeIncomingMsg(companyName, recentLog) {
+  const sys = 'あなたはフリーランス（高崎・屋号インフォサクセス）の案件管理アシスタントです。クライアントとの直近のやり取りログを読み、(1)いま残っている宿題のタスク化 (2)返信文の下書き を作り、JSONだけを出力します。説明やコードブロック記法は付けないこと。\n{"task":{"has":true|false,"title":"タスク名（25字以内。報告タイミングが同じ複数の指示は1件にまとめた名前にする）","note":"内訳の箇条書き（各行を・で始め改行区切り。※既に完了報告済みの項目は含めない。内訳が1つだけ・不要なら空文字）","due":"YYYY-MM-DD"},"reply":"返信文の下書き。空文字の条件は後述"}\nタスク判定基準（重要）：ログ全体を時系列で読み、相手からの依頼のうち「その後に自分（高崎）が完了・提出・送付・反映済みと報告していないもの」だけをタスク化する。全て対応済みならhas:false。挨拶・お礼・進捗確認・支払い連絡のみもhas:false。\n期限(due)の規則：メッセージに期限・締切が明記されていればその日付。明記がなければ、至急・本日中・今日中など緊急性が高い場合は今日、通常は明日を入れる（has:trueなら必ず日付を入れる）。今日は' + dStr(0) + '、明日は' + dStr(1) + '。\n返信(reply)の規則：ログの最後の発言が相手で、自分がまだ返信していない場合のみ下書きを作る。最後の発言が自分（返信済み）の場合や、返信不要な自動通知のみの場合は空文字。文体はログ内の自分の返信と同じトーン・改行リズムを厳密に守る（「お世話になっております。」で始め「引き続きよろしくお願いいたします。」等で締める）。依頼への承諾・要点の復唱を簡潔に。金額・条件など判断が必要な点は断定せず「確認のうえ改めてご連絡いたします」とする。事実の捏造禁止。';
+  const out = await callClaude({ system: sys, user: `案件「${companyName || ""}」の直近のやり取り（時系列）:\n\n${recentLog}`, maxTokens: 900 });
   const clean = out.replace(/```json|```/g, "").trim();
   const j = JSON.parse(clean);
   if (!j || !j.task || typeof j.task.has !== "boolean") throw new Error("bad json");
@@ -5275,7 +5276,8 @@ const S = {
   tsqAdd: { border: "none", borderRadius: 9, background: "rgba(217,162,59,0.18)", color: "#D9A23B", fontWeight: 800, fontSize: 13, padding: "7px 13px", cursor: "pointer" },
   tsqIgnore: { border: "none", background: "transparent", color: C.ink3, fontWeight: 700, fontSize: 13, padding: "7px 9px", cursor: "pointer" },
   aiPill: { flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 800, color: "#D9A23B", background: "rgba(217,162,59,0.14)", borderRadius: 999, padding: "3px 9px", whiteSpace: "nowrap" },
-  rsugBox: { display: "flex", flexDirection: "column", gap: 6, margin: "2px 0 14px 31px", padding: "10px 12px", borderRadius: 10, background: "rgba(107,138,255,0.08)" },
+  aiPillBlue: { flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 800, color: C.accent, background: "rgba(107,138,255,0.16)", borderRadius: 999, padding: "3px 9px", whiteSpace: "nowrap" },
+  rsugBox: { display: "flex", flexDirection: "column", gap: 6, margin: "2px 0 14px 0", padding: "11px 13px", borderRadius: 11, background: "rgba(107,138,255,0.10)", border: "1px solid rgba(107,138,255,0.45)" },
   rsugHead: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: C.accent },
   rsugCopy: { marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, border: "none", borderRadius: 8, background: "rgba(107,138,255,0.16)", color: C.accent, fontWeight: 800, fontSize: 12.5, padding: "6px 11px", cursor: "pointer", flexShrink: 0 },
   rsugX: { border: "none", background: "transparent", color: C.ink3, cursor: "pointer", padding: 3, display: "inline-flex", flexShrink: 0 },
