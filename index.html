@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-14a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-14b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -618,7 +618,21 @@ export default function App() {
       if (t || u) {
         setShareIntent({ text: t, url: u });
       }
-      if (t || u || tab) {
+      // POST共有（長文対応）：sw.jsがCacheに置いたペイロードを受け取る
+      if (sp.get("shared") === "1") {
+        (async () => {
+          try {
+            const cache = await caches.open("helm-share");
+            const res = await cache.match("/__share_payload__");
+            if (res) {
+              const p = await res.json();
+              await cache.delete("/__share_payload__");
+              if (p && (p.text || p.url || p.title)) setShareIntent({ text: p.text || p.title || "", url: p.url || "" });
+            }
+          } catch {}
+        })();
+      }
+      if (t || u || tab || sp.get("shared")) {
         const clean = window.location.origin + window.location.pathname;
         window.history.replaceState({}, "", clean);
       }
@@ -856,6 +870,20 @@ export default function App() {
 
   // 共有ピッカーで選ばれた案件に、共有内容（リンク／本文）を反映して案件を開く
   const applyShare = (project) => {
+    // 先にトーク履歴として解釈を試みる（CW/ランサーズ/Chatwork形式ならログ欄へ・重複自動除外）
+    const shareText = (shareIntent && shareIntent.text) || "";
+    if (shareText.length >= 40) {
+      const parsed = parsePastedLog(shareText, project.company);
+      if (parsed.src !== "plain" && parsed.entries.length > 0) {
+        const merged = mergeLogEntries(project.msgs || [], parsed.entries, parsed.src);
+        const next = projects.map((p) => (p.id === project.id ? { ...p, msgs: merged.list } : p));
+        persist(next);
+        setShareIntent(null);
+        setFocusTaskId(null);
+        setEditing(next.find((p) => p.id === project.id) || null);
+        return;
+      }
+    }
     const cls = classifyShare(shareIntent);
     const patch = {};
     if (cls.links.length) {
