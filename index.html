@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-14w"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-14y"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1328,7 +1328,7 @@ export default function App() {
         {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
         {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
         {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onClearRsug={clearRsug} />}
-        {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} activeLane={focusFilter} setActiveLane={setFocusFilter} />}
+        {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} activeLane={focusFilter} setActiveLane={setFocusFilter} />}
         {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
       </main>
 
@@ -2331,7 +2331,7 @@ function InboxPanel() {
   );
 }
 
-function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderProject, onSortManual, onReorderCommit, onToggleProject, onSetStatus, activeLane, setActiveLane, singleLane }) {
+function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderProject, onSortManual, onReorderCommit, onToggleProject, onSetStatus, onOpenReply, activeLane, setActiveLane, singleLane }) {
   const wide = useWideScreen();
   const [adding, setAdding] = useState(null); // 追加中のレーンキー（null=なし）
   const [openDone, setOpenDone] = useState(() => new Set()); // アコーディオンで完了を開いているレーン
@@ -2462,17 +2462,9 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
       <GroupHead project={g.project} lane={lane}
         dragActive={dragTid !== null || dragGid !== null}
         onStartDrag={startGroupDrag} onOpen={onOpen} onToggleProject={onToggleProject} />
-      {(lane === "waiting" || lane === "payment") && dragTid === null && dragGid === null && (() => {
-        const sug = statusSuggestion(g.project);
-        if (!sug || sug.mark !== "warn" || !sug.suggest) return null;
-        return (
-          <div style={{ ...S.suggestBar, marginTop: 4, marginBottom: 6 }}>
-            <AlertTriangle size={13} color="#D9A23B" strokeWidth={2.4} style={{ flexShrink: 0 }} />
-            <span style={S.suggestText}>{sug.reason} →「{sug.suggest}」では？</span>
-            <button style={S.suggestBtn} onClick={() => onSetStatus && onSetStatus(g.project.id, sug.suggest)}>{sug.suggest}にする</button>
-          </div>
-        );
-      })()}
+      {dragTid === null && dragGid === null && (
+        <GroupAssist p={g.project} onSetStatus={onSetStatus} onOpenReply={onOpenReply} />
+      )}
       {g.tasks.length > 0 && (
       <div style={S.taskGroupTasks}>
         {g.tasks.map((t) => (
@@ -2586,6 +2578,41 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
 }
 
 // 案件グループの見出し（案件名行）。長押し180msでグループごと並べ替えドラッグ、タップで案件詳細
+// 各レーンの案件見出し直下に出すアシスト（⚠ステータス提案＋返信アシスト）。全レーン共通。
+function GroupAssist({ p, onSetStatus, onOpenReply }) {
+  const [copied, setCopied] = useState(false);
+  const sug = statusSuggestion(p);
+  const lastMsg = (p.msgs || [])[(p.msgs || []).length - 1];
+  const lastIsClient = !!(lastMsg && lastMsg.who === "client");
+  const warn = sug && sug.mark === "warn" && sug.suggest;
+  if (!warn && !lastIsClient) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, margin: "2px 0 8px" }}>
+      {warn && (
+        <div style={S.suggestBar}>
+          <AlertTriangle size={13} color="#D9A23B" strokeWidth={2.4} style={{ flexShrink: 0 }} />
+          <span style={S.suggestText}>{sug.reason} →「{sug.suggest}」では？</span>
+          <button style={S.suggestBtn} onClick={() => onSetStatus && onSetStatus(p.id, sug.suggest)}>{sug.suggest}にする</button>
+        </div>
+      )}
+      {lastIsClient && p.rsug && (
+        <div style={S.cardRsug} onClick={() => onOpenReply && onOpenReply(p.id)} title="タップで返信アシストを開く">
+          <Reply size={13} color={C.accent} strokeWidth={2.4} style={{ flexShrink: 0, marginTop: 3 }} />
+          <span style={{ ...S.cardRsugText, ...S.cardRsugClamp }}>{p.rsug.text}</span>
+          <button style={S.cardRsugCopy} onClick={async (e) => { e.stopPropagation(); const ok = await copyText(p.rsug.text); if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500); } }}>
+            {copied ? <Check size={12} strokeWidth={2.8} /> : <Copy size={12} strokeWidth={2.2} />}{copied ? "OK" : "コピー"}
+          </button>
+        </div>
+      )}
+      {lastIsClient && !p.rsug && (
+        <button style={{ ...S.cardRsugGen, marginTop: 0 }} onClick={() => onOpenReply && onOpenReply(p.id)}>
+          <Reply size={13} strokeWidth={2.4} />返信アシスト
+        </button>
+      )}
+    </div>
+  );
+}
+
 function GroupHead({ project, lane, dragActive, onStartDrag, onOpen, onToggleProject }) {
   const lpTimer = useRef(null);
   const downInfo = useRef(null);
@@ -2977,6 +3004,16 @@ function LogSection({ d, onChange }) {
           <button style={S.logImportBtn} onClick={doImport}>取り込む</button>
         )}
         {msg && <div style={S.logMsg}>{msg}</div>}
+        {msgs.length > 0 && (
+          <button style={S.logExportBtn} onClick={async () => {
+            const lines = [`【案件】${d.company || "（無題）"}（${d.platform || ""}）`, `ステータス：${d.status}${d.deadline ? `／納期：${d.deadline}` : ""}`, "", "--- やり取りログ（全文・時系列） ---"];
+            msgs.forEach((m) => lines.push(`[${fmtLogAt(m.at)}] ${m.who === "me" ? "自分" : (m.name || "相手")}：`, m.body, ""));
+            const ok = await copyText(lines.join("\n"));
+            setMsg(ok ? `ログ全文（${msgs.length}件）をコピーしました。Claudeプロジェクトの知識ファイル等に貼り付けできます` : "コピーに失敗しました");
+          }}>
+            <Copy size={13} strokeWidth={2.2} />ログ全文をコピー（{msgs.length}件）
+          </button>
+        )}
       </div>}
     </>
   );
@@ -3806,7 +3843,7 @@ function SubtaskSheet({ project, task, focus, onClose, onUpdate, onToggle, onDel
             onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); onClose(); } }} />
           <div style={S.infoRow}>
             <AlignLeft size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
-            <textarea style={S.taskSheetNote} value={task.note || ""} placeholder="詳細・メモ" rows={2}
+            <textarea style={{ ...S.taskSheetNote, minHeight: 140, resize: "vertical" }} value={task.note || ""} placeholder="詳細・メモ" rows={6}
               onChange={(e) => onUpdate({ note: e.target.value })} />
           </div>
           <NoteLinks text={task.note} indent={28} />
@@ -5498,6 +5535,7 @@ const S = {
   logImportBtn: { alignSelf: "flex-end", border: "none", borderRadius: 9, background: C.accent, color: "#0F1318", fontWeight: 800, fontSize: 13, padding: "8px 16px", cursor: "pointer" },
   logMsg: { fontSize: 12.5, color: C.ink3, lineHeight: 1.5 },
   logShowAll: { alignSelf: "flex-start", border: "none", background: "transparent", color: C.ink3, fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "2px 0" },
+  logExportBtn: { alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", color: C.ink3, fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "4px 0" },
   logBadge: { display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 700, color: C.ink2 },
   logHeadMeta: { fontSize: 12, color: C.ink3, fontWeight: 600, marginLeft: 2, whiteSpace: "nowrap" },
   logBodyClamp: { display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden" },
