@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-23b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -291,10 +291,10 @@ function daysUntil(dateStr) {
 function dueMeta(dateStr) {
   const n = daysUntil(dateStr);
   if (n === null) return { n, color: "#8B95A5", text: "期限なし", urgent: false };
-  if (n < 0)  return { n, color: "#FF6B6B", text: `${Math.abs(n)}日超過`, urgent: true };
-  if (n === 0) return { n, color: "#FF6B6B", text: "今日", urgent: true };
-  if (n === 1) return { n, color: "#FF6B6B", text: "明日", urgent: true };
-  if (n <= 3) return { n, color: "#FF6B6B", text: `あと${n}日`, urgent: true };
+  if (n < 0)  return { n, color: "#F28B82", text: `${Math.abs(n)}日超過`, urgent: true };
+  if (n === 0) return { n, color: "#F28B82", text: "今日", urgent: true };
+  if (n === 1) return { n, color: "#F28B82", text: "明日", urgent: true };
+  if (n <= 3) return { n, color: "#F28B82", text: `あと${n}日`, urgent: true };
   if (n <= 7) return { n, color: "#C0C9D6", text: `あと${n}日`, urgent: false };
   return { n, color: "#C0C9D6", text: `あと${n}日`, urgent: false };
 }
@@ -1769,7 +1769,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
                     {openCard === "progress" && (
                       <span style={S.replyItemMetaRow}>
                         <span style={S.replyItemReward}>{yenMan(p.reward)}</span>
-                        <span style={{ ...S.replyItemDueSub, color: dm.n < 0 ? "#FF6B6B" : "#C0C9D6" }}>{dm.text}</span>
+                        <span style={{ ...S.replyItemDueSub, color: dm.n < 0 ? "#F28B82" : "#C0C9D6" }}>{dm.text}</span>
                       </span>
                     )}
                     {dueItems.length > 0 && (
@@ -1781,7 +1781,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
                               ? <span onClick={(e) => { e.stopPropagation(); onToggleTask && onToggleTask(p.id, it.tid); }} style={S.dueTaskCheck} title="タスクを完了"><Circle size={16} color={C.ink3} strokeWidth={2} /></span>
                               : <span style={S.dueTaskCheck}>{it.isDeadline ? "📅" : ""}</span>}
                             <span style={S.dueTaskName}>{it.label}</span>
-                            <span style={{ ...S.dueTaskDays, color: it.n < 0 ? "#FF6B6B" : "#C0C9D6" }}>{dDays(it.n)}</span>
+                            <span style={{ ...S.dueTaskDays, color: it.n < 0 ? "#F28B82" : "#C0C9D6" }}>{dDays(it.n)}</span>
                           </span>
                         ))}
                       </span>
@@ -1839,8 +1839,8 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
                 return groups.map((g) => {
                   if (g.items.length === 0) return null;
                   return (
-                    <div key={g.key} style={{ ...S.focusGroup, borderLeft: `3px solid ${g.color}55` }}>
-                      <div style={{ ...S.focusGroupBar, background: g.color + "1A", border: `1px solid ${g.color}33`, color: g.color, marginTop: 0 }}>
+                    <div key={g.key} style={{ ...S.focusGroup, background: g.color + "0D", borderLeft: `3px solid ${g.color}80` }}>
+                      <div style={{ ...S.focusGroupBar, background: g.color + "24", border: `1px solid ${g.color}33`, color: g.color, marginTop: 0 }}>
                         <span>{g.label}</span>
                         <span style={{ ...S.focusGroupCount, color: g.color }}>{g.items.length}</span>
                       </div>
@@ -2857,7 +2857,7 @@ function TaskMetaChips({ t }) {
   const judge = taskJudgeDate(t);
   const lab = judge ? dateLabelJP(judge) : null;
   const jn = judge ? daysUntil(judge) : null;
-  const chipColor = jn === null ? C.ink3 : (jn < 0 ? "#FF6B6B" : C.ink2); // 赤は超過のみ
+  const chipColor = jn === null ? C.ink3 : (jn < 0 ? "#F28B82" : C.ink2); // 赤は超過のみ（Googleタスク風の淡い赤）
   return (
     <div style={S.dueWrap}>
       <span style={{ ...S.dueChip, color: judge ? chipColor : C.ink3 }}>
@@ -3916,7 +3916,7 @@ function CalendarView({ projects, onOpen, forceNarrow }) {
       const dates = [...new Set([t.start, t.due].filter(Boolean))];
       dates.forEach((dk) => push(dk, { kind: "task", label: t.title, color: C.accent, project: p }));
     });
-    if (p.deadline && p.id !== INBOX_ID && p.status !== "完了") push(p.deadline, { kind: "deadline", label: "納期", color: "#FF6B6B", project: p });
+    if (p.deadline && p.id !== INBOX_ID && p.status !== "完了") push(p.deadline, { kind: "deadline", label: "納期", color: "#F28B82", project: p });
   });
 
   const startDow = new Date(ym.y, ym.m, 1).getDay();
@@ -5351,7 +5351,8 @@ const S = {
   triRow: { display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr)", gap: 24, alignItems: "start" },
   triCol: { minWidth: 0 },
   // すべてタブのグループ枠：色バー＋左の細い縦ライン。paddingLeftとマイナスマージンを相殺してカード幅は不変
-  focusGroup: { display: "grid", gap: 14, paddingLeft: 11, marginLeft: -14 },
+  // グループ全体を薄い色付きパネルで囲う。左右のマイナスマージンでカード幅は不変（外側余白を使う）
+  focusGroup: { display: "grid", gap: 14, padding: "10px 12px 12px", margin: "0 -12px 6px -15px", borderRadius: 14 },
   // 並び替え矢印（↑↓）：極小・グレー。常時表示
   arrowPair: { display: "inline-flex", alignItems: "center", gap: 2, flexShrink: 0, marginLeft: 6 },
   arrowBtn: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, borderRadius: 6, color: C.ink3, cursor: "pointer", userSelect: "none" },
@@ -5505,14 +5506,14 @@ const S = {
   cardCompany: { fontFamily: F.disp, fontWeight: 800, fontSize: 19, letterSpacing: 0.2, lineHeight: 1.3, color: C.ink },
   cardWork: { display: "none" },
   cardMetaLine: { display: "flex", alignItems: "baseline", gap: 10 },
-  cardDeadlineOver: { color: "#FF8A8A" },
+  cardDeadlineOver: { color: "#F28B82" },
   cardDeadlineEmpty: { color: C.ink3 },
   cardDateHidden: { position: "absolute", left: 0, bottom: 0, width: 1, height: 1, opacity: 0, pointerEvents: "none" },
   dateField: { position: "relative", display: "inline-flex", alignItems: "center", gap: 4 },
   taskDateSep: { color: C.ink3, fontSize: 14 },
   dateFieldPlaceholder: { fontSize: 16, color: C.ink3, cursor: "pointer", padding: "2px 0" },
   dateFieldVal: { fontSize: 16, fontWeight: 600, color: C.accent, cursor: "pointer", padding: "2px 0" },
-  dateFieldOver: { color: "#FF8A8A" },
+  dateFieldOver: { color: "#F28B82" },
   dateFieldClear: { display: "inline-flex", border: "none", background: "transparent", color: C.ink3, padding: 2, cursor: "pointer" },
   calModalScrim: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 120, padding: 16 },
   calModalCard: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: "16px 16px 12px", width: 372, maxWidth: "94vw", boxShadow: "0 24px 64px rgba(0,0,0,0.55)" },
