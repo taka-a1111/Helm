@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-23h"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23i"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -355,7 +355,7 @@ function normalizeProjects(arr) {
       status: STATUS_MIGRATE[p.status] || p.status || "進行中",
       start: p.start ?? "",
       msgs: cleanMsgs(Array.isArray(p.msgs) ? p.msgs : []),
-      tsq: p.tsq ?? null, tsqSeen: p.tsqSeen ?? "", rsug: p.rsug ?? null, rneed: p.rneed ?? null, statusAt: p.statusAt ?? null,
+      tsq: p.tsq ? (p.tsq.items ? p.tsq : { srcId: p.tsq.srcId || "", items: p.tsq.title ? [{ title: p.tsq.title, note: p.tsq.note || "", due: p.tsq.due || "", urgent: !!p.tsq.urgent }] : [] }) : null, tsqSeen: p.tsqSeen ?? "", rsug: p.rsug ?? null, rneed: p.rneed ?? null, statusAt: p.statusAt ?? null,
       received: p.received ?? "", replyDraft: p.replyDraft ?? "", repliedAt: p.repliedAt ?? null, replyUrl: p.replyUrl ?? "", replyHistory: p.replyHistory ?? [], summary: p.summary ?? "",
       tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "", note: t.note ?? "", repeat: t.repeat ?? null, doneAt: t.doneAt ?? (t.done ? Date.now() : null) })),
     };
@@ -800,11 +800,12 @@ export default function App() {
           .join("\n\n");
         const j = await analyzeIncomingMsg(target.company, recentLog);
         if (editingRef2.current) return; // 解析中に編集が始まったら破棄（次回やり直し）
-        const t = j.task || {};
+        const items = (j.tasks || []).filter((t) => t && t.title).slice(0, 4)
+          .map((t) => ({ title: String(t.title).slice(0, 40), note: String(t.note || ""), due: /^\d{4}-\d{2}-\d{2}$/.test(t.due || "") ? t.due : "", urgent: !!t.urgent }));
         const cur = projectsRef.current || [];
         persist(cur.map((p) => p.id !== target.id ? p : {
           ...p, tsqSeen: cm.id,
-          tsq: t.has && t.title ? { srcId: cm.id, title: String(t.title).slice(0, 40), note: String(t.note || ""), due: /^\d{4}-\d{2}-\d{2}$/.test(t.due || "") ? t.due : "", urgent: !!t.urgent } : null,
+          tsq: items.length ? { srcId: cm.id, items } : null,
           rsug: (j.reply && String(j.reply).trim() && classifyReplyWeight(cm.body || "") !== "claude") ? { srcId: cm.id, text: String(j.reply).trim() } : null,
           rneed: { srcId: cm.id, need: !!(j.reply && String(j.reply).trim()) },
         }));
@@ -3657,26 +3658,33 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
           </div>
 
           {/* ===== AIタスク候補（承認制） ===== */}
-          {!isNew && d.tsq && (
+          {!isNew && d.tsq && (d.tsq.items || []).length > 0 && (
             <div style={S.tsqBox}>
               <div style={S.tsqHead}>
                 <ListPlus size={14} color="#D9A23B" strokeWidth={2.4} />
-                依頼らしき内容を検出しました
+                依頼らしき内容を検出しました{(d.tsq.items || []).length > 1 ? `（${d.tsq.items.length}件・別々のタスクとして追加されます）` : ""}
               </div>
-              <div style={S.tsqTitle}>{d.tsq.title}</div>
-              {d.tsq.note && <div style={S.tsqNote}>{d.tsq.note}</div>}
-              <div style={S.tsqDueTx}>
-                いつやる：{d.tsq.urgent ? "今日（緊急）" : "明日"}
-                {d.tsq.due ? `／期限：${d.tsq.due.slice(5).replace("-", "/")}` : ""}
-              </div>
+              {(d.tsq.items || []).map((it, i) => (
+                <div key={i} style={i > 0 ? { borderTop: `1px solid ${C.line}`, marginTop: 8, paddingTop: 8 } : {}}>
+                  <div style={S.tsqTitle}>{it.title}</div>
+                  {it.note && <div style={S.tsqNote}>{it.note}</div>}
+                  <div style={S.tsqDueTx}>
+                    いつやる：{it.urgent ? "今日（緊急）" : (new Date().getHours() < 17 ? "今日" : "明日")}
+                    {it.due ? `／期限：${it.due.slice(5).replace("-", "/")}` : ""}
+                  </div>
+                </div>
+              ))}
               <div style={S.tsqBtns}>
                 <button style={S.tsqAdd} onClick={() => {
-                  const t = task(d.tsq.title, null);
-                  t.note = d.tsq.note || "";
-                  t.due = d.tsq.due || "";                       // 期限：メッセージに明記があった場合のみ
-                  t.start = (d.tsq.urgent || new Date().getHours() < 17) ? dStr(0) : dStr(1); // いつやる：急ぎ or 17時前=今日／17時以降=明日
-                  setD((p) => ({ ...p, tasks: [...p.tasks, t], tsq: null }));
-                }}>タスクに追加</button>
+                  const adds = (d.tsq.items || []).map((it) => {
+                    const t = task(it.title, null);
+                    t.note = it.note || "";
+                    t.due = it.due || "";                        // 期限：メッセージに明記があった場合のみ
+                    t.start = (it.urgent || new Date().getHours() < 17) ? dStr(0) : dStr(1); // 急ぎ or 17時前=今日／17時以降=明日
+                    return t;
+                  });
+                  setD((p) => ({ ...p, tasks: [...p.tasks, ...adds], tsq: null }));
+                }}>タスクに追加{(d.tsq.items || []).length > 1 ? `（${d.tsq.items.length}件）` : ""}</button>
                 <button style={S.tsqIgnore} onClick={() => set("tsq", null)}>無視</button>
               </div>
             </div>
@@ -5002,11 +5010,15 @@ const driveFolderLinkOf = (p) => ((p && p.links) || []).find((l) => /drive\.goog
 // --- ログの新着（相手の最新メッセージ）から依頼を検出しタスク候補を作る（Sonnet・承認制） ---
 // 粒度ルール：報告タイミングが同じものは1件にまとめ、内訳は詳細(note)へ。1メッセージから原則1件。
 async function analyzeIncomingMsg(companyName, recentLog) {
-  const sys = 'あなたはフリーランス（高崎・屋号インフォサクセス）の案件管理アシスタントです。クライアントとの直近のやり取りログを読み、(1)いま残っている宿題のタスク化 (2)返信文の下書き を作り、JSONだけを出力します。説明やコードブロック記法は付けないこと。\n{"task":{"has":true|false,"title":"タスク名（25字以内。報告タイミングが同じ複数の指示は1件にまとめた名前にする）","note":"内訳の箇条書き（各行を・で始め改行区切り。※既に完了報告済みの項目は含めない。内訳が1つだけ・不要なら空文字）","due":"YYYY-MM-DD（メッセージに期限・締切が明記されている場合のみ。無ければ空文字）","urgent":true|false},"reply":"返信文の下書き。空文字の条件は後述"}\nタスク判定基準（重要）：ログ全体を時系列で読み、相手からの依頼のうち「その後に自分（高崎）が完了・提出・送付・反映済みと報告していないもの」だけをタスク化する。全て対応済みならhas:false。挨拶・お礼・進捗確認・支払い連絡のみもhas:false。\nurgentの規則：至急・本日中・今日中・ASAPなど緊急性が高い表現があればtrue、通常はfalse。今日は' + dStr(0) + '。\n返信(reply)の規則：ログの最後の発言が相手で、自分がまだ返信していない場合のみ下書きを作る。最後の発言が自分（返信済み）の場合、返信不要な自動通知のみの場合、または「よろしくお願いします」「ありがとうございます」等の締めの挨拶・お礼のみで質問・依頼・確認事項を含まない場合は空文字。文体はログ内の自分の返信と同じトーン・改行リズムを厳密に守る（「お世話になっております。」で始め「引き続きよろしくお願いいたします。」等で締める）。依頼への承諾・要点の復唱を簡潔に。自分の最後の返信より後に相手から複数のメッセージが届いている場合は、その全メッセージに1通でまとめて返信する（各メッセージの内容に漏れなく応答する）。金額・条件など判断が必要な点は断定せず「確認のうえ改めてご連絡いたします」とする。事実の捏造禁止。';
+  const sys = 'あなたはフリーランス（高崎・屋号インフォサクセス）の案件管理アシスタントです。クライアントとの直近のやり取りログを読み、(1)いま残っている宿題のタスク化 (2)返信文の下書き を作り、JSONだけを出力します。説明やコードブロック記法は付けないこと。\n{"tasks":[{"title":"タスク名（25字以内）","note":"内訳の箇条書き（各行を・で始め改行区切り。※既に完了報告済みの項目は含めない。内訳が1つだけ・不要なら空文字）","due":"YYYY-MM-DD（メッセージに期限・締切が明記されている場合のみ。無ければ空文字）","urgent":true|false}],"reply":"返信文の下書き。空文字の条件は後述"}\nタスクの分け方（重要）：同じ成果物・同じ資料への複数の指示は1件にまとめて内訳をnoteに入れる。ただし別の成果物・別の資料・別の対象物への指示は必ず別々のタスクに分ける（例：「サウナリストの修正」と「WEBセミナー資料の修正」は2件に分ける）。タスクが無ければ空配列 []。\nタスク判定基準（重要）：ログ全体を時系列で読み、相手からの依頼のうち「その後に自分（高崎）が完了・提出・送付・反映済みと報告していないもの」だけをタスク化する。全て対応済み、または挨拶・お礼・進捗確認・支払い連絡のみなら tasks は空配列。\nurgentの規則：至急・本日中・今日中・ASAPなど緊急性が高い表現があればtrue、通常はfalse。今日は' + dStr(0) + '。\n返信(reply)の規則：ログの最後の発言が相手で、自分がまだ返信していない場合のみ下書きを作る。最後の発言が自分（返信済み）の場合、返信不要な自動通知のみの場合、または「よろしくお願いします」「ありがとうございます」等の締めの挨拶・お礼のみで質問・依頼・確認事項を含まない場合は空文字。文体はログ内の自分の返信と同じトーン・改行リズムを厳密に守る（「お世話になっております。」で始め「引き続きよろしくお願いいたします。」等で締める）。依頼への承諾・要点の復唱を簡潔に。自分の最後の返信より後に相手から複数のメッセージが届いている場合は、その全メッセージに1通でまとめて返信する（各メッセージの内容に漏れなく応答する）。金額・条件など判断が必要な点は断定せず「確認のうえ改めてご連絡いたします」とする。事実の捏造禁止。';
   const out = await callClaude({ system: sys, user: `案件「${companyName || ""}」の直近のやり取り（時系列）:\n\n${recentLog}`, maxTokens: 900 });
   const clean = out.replace(/```json|```/g, "").trim();
   const j = JSON.parse(clean);
-  if (!j || !j.task || typeof j.task.has !== "boolean") throw new Error("bad json");
+  // 新形式(tasks配列)と旧形式(task単体)の両対応
+  if (j && !Array.isArray(j.tasks) && j.task && typeof j.task.has === "boolean") {
+    j.tasks = (j.task.has && j.task.title) ? [j.task] : [];
+  }
+  if (!j || !Array.isArray(j.tasks)) throw new Error("bad json");
   return j;
 }
 
