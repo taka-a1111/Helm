@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-23aj"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23ak"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -5185,7 +5185,7 @@ function titleSim(a, b) {
   let inter = 0; A.forEach((x) => { if (B.has(x)) inter++; });
   return inter / Math.min(A.size, B.size);
 }
-const isDupTaskTitle = (title, tasks) => (tasks || []).some((t) => !t.done && titleSim(title, t.title) >= 0.66);
+const isDupTaskTitle = (title, tasks) => (tasks || []).some((t) => !t.done && titleSim(title, t.title) >= 0.75);
 // 表示用：既存タスクと重複する候補を除いた残り（保存後に手動追加されたケースも表示段階で吸収）
 const liveTsqItems = (p) => (p && p.tsq && p.tsq.items ? p.tsq.items.filter((it) => !isDupTaskTitle(it.title, p.tasks)) : []);
 
