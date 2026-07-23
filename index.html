@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-23t"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23u"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1522,7 +1522,9 @@ export default function App() {
         {triPane ? (
           <div style={S.triRow}>
             <div style={S.triCol}>
-              <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />
+              <div style={S.triSticky}>
+                <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />
+              </div>
               {focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
               {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onClearRsug={clearRsug} onAckSug={ackSug} heldRank={held.projRank} />}
               {focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
@@ -1530,7 +1532,7 @@ export default function App() {
             <div style={S.triCol}>
               <TasksView forceNarrow projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} activeLane={paneLane} setActiveLane={setPaneLane} heldLane={held.taskLane} />
             </div>
-            <div style={S.triCol}>
+            <div style={{ ...S.triCol, ...S.triColCal }}>
               <CalendarView projects={projects} onOpen={openProject} forceNarrow />
             </div>
           </div>
@@ -2815,7 +2817,7 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
   return (
     <div style={S.colWrap}>
       {!singleLane && (
-      <div style={S.taskTabs}>
+      <div style={{ ...S.taskTabs, ...(forceNarrow ? S.triStickyTabs : {}) }}>
         {TASK_LANES.map((L) => {
           const active = activeLane === L.key;
           return (
@@ -5559,6 +5561,10 @@ const S = {
   mainTri: { maxWidth: 1720 }, // PC 3画面横並び時は広く使う
   triRow: { display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr)", gap: 24, alignItems: "start" },
   triCol: { minWidth: 0 },
+  // 3画面表示：タブ行をヘッダ直下に固定（スクロールしても見える）
+  triSticky: { position: "sticky", top: 56, zIndex: 15, background: C.bg, paddingTop: 2, paddingBottom: 4 },
+  triStickyTabs: { position: "sticky", top: 56, zIndex: 15, background: C.bg, paddingTop: 2, paddingBottom: 4, marginBottom: 10 },
+  triColCal: { paddingTop: 48 }, // タブ行の高さぶん下げてカレンダーの頭を揃える
   // すべてタブのグループ枠：色バー＋左の細い縦ライン。paddingLeftとマイナスマージンを相殺してカード幅は不変
   // グループ全体を薄い色付きパネルで囲う。左右のマイナスマージンでカード幅は不変（外側余白を使う）
   focusGroup: { display: "grid", gap: 14, padding: "10px 12px 12px", margin: "0 -12px 6px -15px", borderRadius: 14 },
