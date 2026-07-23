@@ -44,7 +44,7 @@ import { createRoot } from "https://esm.sh/react-dom@18.2.0/client?deps=react@18
 import {
   LayoutDashboard, Briefcase, ListChecks, Plus, X, Trash2, Reply,
   Clock, CheckCircle2, Circle, AlertTriangle, Inbox, Sparkles, Copy, Check,
-  CalendarDays, Coins, ExternalLink, GripVertical, Settings, ChevronLeft, ChevronRight, ListPlus, Download, Upload,
+  CalendarDays, Coins, ExternalLink, GripVertical, Settings, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ListPlus, Download, Upload,
   AlignLeft, CornerDownRight, Link2, ArrowUpDown, Combine, Repeat, Pencil, Flag,
   Github, MessageCircle, Globe, FileText, Table, User, Hourglass, Search
 } from "https://esm.sh/lucide-react@0.383.0?deps=react@18.2.0";
@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-17d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -434,7 +434,7 @@ function taskInLane(project, task, lane) {
 function projectInLane(p, lane) {
   const l = projectFallbackLane(p);
   if (l === lane) return true;
-  return lane === "today" && (l === "waiting" || l === "payment") && dueArrived(p.start);
+  return lane === "today" && (l === "waiting" || l === "payment") && dueArrived(p.start || p.deadline);
 }
 // 未完了タスクが1つも無い案件のレーン判定。「すべて」の区分けと各タブの表示・件数を一致させるために使う
 function projectFallbackLane(p) {
@@ -442,7 +442,7 @@ function projectFallbackLane(p) {
   if ((p.tasks || []).some((t) => !t.done)) return null; // 未完了タスクがあればタスク側で判定
   if (p.status === "相手待ち") return "waiting";
   if (p.status === "支払い待ち") return "payment";
-  const n = daysUntil(p.start);
+  const n = daysUntil(p.start || p.deadline); // 案件startは廃止。旧データはstart優先、以後は納期で判定
   if (n !== null && n <= 0) return "today";
   if (n === 1) return "tomorrow";
   return "later";
@@ -532,6 +532,8 @@ export default function App() {
     (async () => { try { await supabase.from("helm_state").update({ prefs: { sortMode: m } }).eq("id", SUPABASE_ROW_ID); } catch {} })();
   };
   const wide = useWideScreen(); // PCではタスク画面を横幅いっぱいに広げる
+  const triPane = useWideScreen(1200); // PC：案件・タスク・カレンダーの3画面を横並び表示
+  const [paneLane, setPaneLane] = useState("today"); // 3画面表示のタスク列で選択中のレーン
   const VIEWS = ["focus", "calendar"];
   useEffect(() => { try { window.scrollTo(0, 0); const m = document.querySelector("main"); if (m) m.scrollTop = 0; } catch {} }, [view]);
   // 追従バー（フィルタチップ）をヘッダー直下に貼り付けるため、ヘッダー実高を CSS 変数に反映
@@ -1235,6 +1237,9 @@ export default function App() {
   // カードから返信案を消す／その場で生成する
   const clearRsug = (pid) =>
     persist((projectsRef.current || []).map((p) => p.id !== pid ? p : { ...p, rsug: null }));
+  // サジェストの✕却下＝返信済み扱い（アイコンリアクション運用向け）。新着メッセージが来るまで再提案しない
+  const ackSug = (pid) =>
+    persist((projectsRef.current || []).map((p) => p.id !== pid ? p : { ...p, sugAckAt: new Date().toISOString() }));
   const markSent = (pid, text) => {
     const now = new Date();
     const at = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
@@ -1393,7 +1398,7 @@ export default function App() {
             style={S.tab}>
             <Search size={22} strokeWidth={2} />
           </button>
-          {[
+          {!triPane && [
             ["focus", "フォーカス", LayoutDashboard],
             ["calendar", "カレンダー", CalendarDays],
           ].map(([k, label, Icon]) => (
@@ -1409,12 +1414,31 @@ export default function App() {
       </header>
 
       {/* ===== Body ===== */}
-      <main style={S.main} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
-        {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
-        {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
-        {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onClearRsug={clearRsug} heldRank={held.projRank} />}
-        {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
-        {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
+      <main style={{ ...S.main, ...(triPane ? S.mainTri : {}) }} onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
+        {triPane ? (
+          <div style={S.triRow}>
+            <div style={S.triCol}>
+              <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />
+              {focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
+              {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onClearRsug={clearRsug} onAckSug={ackSug} heldRank={held.projRank} />}
+              {focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
+            </div>
+            <div style={S.triCol}>
+              <TasksView forceNarrow projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} activeLane={paneLane} setActiveLane={setPaneLane} heldLane={held.taskLane} />
+            </div>
+            <div style={S.triCol}>
+              <CalendarView projects={projects} onOpen={openProject} forceNarrow />
+            </div>
+          </div>
+        ) : (
+          <>
+            {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
+            {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
+            {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onClearRsug={clearRsug} onAckSug={ackSug} heldRank={held.projRank} />}
+            {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
+            {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
+          </>
+        )}
       </main>
 
       {shareIntent && <SharePicker intent={shareIntent} projects={projects} onPick={applyShare} onClose={goBack} />}
@@ -1497,7 +1521,7 @@ export default function App() {
 /* ============================================================
    フォーカス（ダッシュボード）
    ============================================================ */
-function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onToggleProject, onReorderTask, onMoveTask, sortMode, setSortMode, onSetStatus, onOpenReply, onClearRsug, heldRank }) {
+function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onToggleProject, onReorderTask, onMoveTask, sortMode, setSortMode, onSetStatus, onOpenReply, onClearRsug, onAckSug, heldRank }) {
   const [openCard, setOpenCard] = useState(null);
   const [openMsg, setOpenMsg] = useState(null);
 
@@ -1545,6 +1569,21 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
     document.addEventListener("pointercancel", up);
   };
   const wide = useWideScreen();
+
+  // 矢印（↑↓）で案件を1つ上下へ。表示中のカードのDOM順で隣と入れ替える
+  const arrowMove = (pid, dir, ev) => {
+    try {
+      setSortMode("manual");
+      const card = ev.currentTarget.closest("[data-pid]");
+      const scope = card ? card.parentElement : document;
+      const els = Array.from(scope.querySelectorAll("[data-pid]"));
+      const i = els.findIndex((el) => el.getAttribute("data-pid") === pid);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= els.length) return;
+      onReorder && onReorder(pid, els[j].getAttribute("data-pid"));
+      onReorderCommit && onReorderCommit();
+    } catch {}
+  };
 
   const startDrag = (pid, el, pointerId, sx, sy) => {
     try { el && el.setPointerCapture && pointerId != null && el.setPointerCapture(pointerId); } catch {}
@@ -1798,7 +1837,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
                           <span style={{ ...S.focusGroupCount, color: g.color }}>{g.items.length}</span>
                         </div>
                       )}
-                      {g.items.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onUpdateTask={onUpdateTask} onEditTask={onEditTask} onToggleTask={onToggleTask} onToggleProject={onToggleProject} onDragHandle={startDrag} dragging={dragId === p.id} dragActive={dragId !== null} onTaskDrag={startTaskDrag} taskDragId={dragTaskId} onSetStatus={onSetStatus} onOpenReply={onOpenReply} onClearRsug={onClearRsug} />)}
+                      {g.items.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onUpdateTask={onUpdateTask} onEditTask={onEditTask} onToggleTask={onToggleTask} onToggleProject={onToggleProject} onDragHandle={startDrag} dragging={dragId === p.id} dragActive={dragId !== null} onTaskDrag={startTaskDrag} taskDragId={dragTaskId} onSetStatus={onSetStatus} onOpenReply={onOpenReply} onClearRsug={onClearRsug} onArrow={arrowMove} onAckSug={onAckSug} />)}
                     </React.Fragment>
                   );
                 });
@@ -1905,7 +1944,7 @@ function ProjectsView({ projects, onOpen }) {
   );
 }
 
-function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onToggleTask, onToggleProject, onDragHandle, dragging, dragActive, onTaskDrag, taskDragId, onSetStatus, onOpenReply, onClearRsug }) {
+function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onToggleTask, onToggleProject, onDragHandle, dragging, dragActive, onTaskDrag, taskDragId, onSetStatus, onOpenReply, onClearRsug, onArrow, onAckSug }) {
   // ステータスの確信度（✓一致／?不明／⚠矛盾）と提案バー
   const sug = statusSuggestion(p);
   const [sugDismiss, setSugDismiss] = useState(false);
@@ -1931,7 +1970,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
   const tRowUp = () => { if (tLp.current) { clearTimeout(tLp.current); tLp.current = null; } };
   const replyN = replyTasksOf(p).length;
   const dl = p.deadline ? dateLabelJP(p.deadline) : null;
-  const st = p.start ? dateLabelJP(p.start) : null;
+  const st = null; // 案件の「いつやる」は廃止（納期のみ表示）
   // ステータス別のカード色（相手待ち＝琥珀／支払い待ち＝緑）
   const statusTint = null; // カンバンの列でステータスが明示されているため、背景色分けは無効化
   const lpTimer = useRef(null);
@@ -2009,6 +2048,9 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
         {!dragActive && Number(p.reward) > 0 && (
           <span style={S.cardRewardInline}>{yenMan(p.reward)}</span>
         )}
+        {!dragActive && onArrow && (
+          <ArrowPair onUp={(e) => onArrow(p.id, -1, e)} onDown={(e) => onArrow(p.id, 1, e)} />
+        )}
       </div>
 
       {!dragActive && sug && sug.mark === "warn" && sug.suggest && !sugDismiss && (
@@ -2016,7 +2058,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
           <AlertTriangle size={13} color="#D9A23B" strokeWidth={2.4} style={{ flexShrink: 0 }} />
           <span style={S.suggestText}>{sug.reason} →「{sug.suggest}」では？</span>
           <button style={S.suggestBtn} onClick={(e) => { stop(e); onSetStatus && onSetStatus(p.id, sug.suggest); }}>{sug.suggest}にする</button>
-          <button style={S.suggestX} title="この提案を隠す" onClick={(e) => { stop(e); setSugDismiss(true); }}><X size={13} strokeWidth={2.2} /></button>
+          <button style={S.suggestX} title="返信済み扱いにする（新着が来るまで再提案しない）" onClick={(e) => { stop(e); setSugDismiss(true); onAckSug && onAckSug(p.id); }}><X size={13} strokeWidth={2.2} /></button>
         </div>
       )}
       {!dragActive && pcLastIsClient && p.rsug && (
@@ -2416,8 +2458,8 @@ function InboxPanel() {
   );
 }
 
-function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderProject, onSortManual, onReorderCommit, onToggleProject, onSetStatus, onOpenReply, activeLane, setActiveLane, singleLane, heldLane }) {
-  const wide = useWideScreen();
+function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderProject, onSortManual, onReorderCommit, onToggleProject, onSetStatus, onOpenReply, onAckSug, activeLane, setActiveLane, singleLane, heldLane, forceNarrow }) {
+  const wide = useWideScreen() && !forceNarrow;
   const [adding, setAdding] = useState(null); // 追加中のレーンキー（null=なし）
   const [openDone, setOpenDone] = useState(() => new Set()); // アコーディオンで完了を開いているレーン
   const [dragTid, setDragTid] = useState(null);
@@ -2474,15 +2516,61 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
     document.addEventListener("pointercancel", up);
   };
 
+  // 矢印（↑↓）で案件グループを1つ上下へ（同一レーン内・DOM表示順）
+  const groupArrow = (pid, dir, ev) => {
+    try {
+      onSortManual && onSortManual();
+      const head = ev.currentTarget.closest("[data-gpid]");
+      const laneEl = head ? head.closest("[data-lane]") : null;
+      const scope = laneEl || document;
+      const els = Array.from(scope.querySelectorAll("[data-gpid]"));
+      const i = els.findIndex((el) => el.getAttribute("data-gpid") === pid);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= els.length) return;
+      onReorderProject && onReorderProject(pid, els[j].getAttribute("data-gpid"));
+      onReorderCommit && onReorderCommit();
+    } catch {}
+  };
+  // 矢印（↑↓）でタスクを1つ上下へ（同一レーン内・案件またぎ可）
+  const taskArrow = (tid, dir, ev) => {
+    try {
+      const row = ev.currentTarget.closest("[data-tid]");
+      const laneEl = row ? row.closest("[data-lane]") : null;
+      const scope = laneEl || document;
+      const els = Array.from(scope.querySelectorAll("[data-tid]"));
+      const i = els.findIndex((el) => el.getAttribute("data-tid") === tid);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= els.length) return;
+      const nb = els[j];
+      onReorderTask && onReorderTask(tid, nb.getAttribute("data-pid"), nb.getAttribute("data-tid"));
+      onReorderCommit && onReorderCommit();
+    } catch {}
+  };
+
   // 長押し→上下ドラッグで案件グループ（案件名）を並べ替え。序列は案件配列そのものを更新するので全タブに反映される
   const startGroupDrag = (pid, el, pointerId, dragLane, name, sx, sy) => {
     try { el && el.setPointerCapture && pointerId != null && el.setPointerCapture(pointerId); } catch {}
     onSortManual && onSortManual(); // 手動並びへ切替（再ソートで戻らないように）
     setDragGid(pid);
     const ghost = makeRowGhost(el, sy || 0, name);
+    // タスク折りたたみでリストが縮み、指の下に別グループが来て即入れ替わるのを防ぐ：
+    // 描画後、つかんだ見出しが指の真下に来るようスクロール補正してから並べ替えを許可する
+    let ready = false;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      try {
+        const grpEl = document.querySelector(`[data-gpid="${pid}"]`);
+        if (grpEl && sy) {
+          const r = grpEl.getBoundingClientRect();
+          const delta = (r.top + r.height / 2) - sy;
+          if (Math.abs(delta) > 4) window.scrollBy(0, delta);
+        }
+      } catch {}
+      ready = true;
+    }));
     const move = (ev) => {
       if (ev.cancelable) ev.preventDefault();
       moveRowGhost(ghost, ev.clientY);
+      if (!ready) return;
       const elAt = document.elementFromPoint(ev.clientX, ev.clientY);
       const grp = elAt && elAt.closest && elAt.closest("[data-gpid]");
       if (grp) {
@@ -2546,17 +2634,18 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
     <div key={g.project.id} style={S.taskGroup} data-gpid={g.project.id}>
       <GroupHead project={g.project} lane={lane}
         dragActive={dragTid !== null || dragGid !== null}
-        onStartDrag={startGroupDrag} onOpen={onOpen} onToggleProject={onToggleProject} />
+        onStartDrag={startGroupDrag} onOpen={onOpen} onToggleProject={onToggleProject}
+        onArrow={groupArrow} />
       {dragTid === null && dragGid === null && (
-        <GroupAssist p={g.project} onSetStatus={onSetStatus} onOpenReply={onOpenReply} />
+        <GroupAssist p={g.project} onSetStatus={onSetStatus} onOpenReply={onOpenReply} onAckSug={onAckSug} />
       )}
-      {g.tasks.length > 0 && (
+      {dragGid === null && g.tasks.length > 0 && (
       <div style={S.taskGroupTasks}>
         {g.tasks.map((t) => (
           <TaskCard key={t.id} t={t} lane={lane}
             onToggle={onToggle} onOpen={onOpen} onOpenTask={onOpenTask} onEditTask={onEditTask}
             dragging={dragTid === t.id} dragActive={dragTid !== null || dragGid !== null}
-            onStartDrag={startTaskDrag}
+            onStartDrag={startTaskDrag} onArrow={taskArrow}
             onChangeStart={(start) => onChangeStart(t.project.id, t.id, start)}
             onChangeDue={(due) => onChangeDue(t.project.id, t.id, due)}
             onChangeKind={(kind) => onChangeKind && onChangeKind(t.project.id, t.id, kind)} />
@@ -2677,6 +2766,7 @@ function GroupAssist({ p, onSetStatus, onOpenReply }) {
           <AlertTriangle size={13} color="#D9A23B" strokeWidth={2.4} style={{ flexShrink: 0 }} />
           <span style={S.suggestText}>{sug.reason} →「{sug.suggest}」では？</span>
           <button style={S.suggestBtn} onClick={() => onSetStatus && onSetStatus(p.id, sug.suggest)}>{sug.suggest}にする</button>
+          <button style={S.suggestX} title="返信済み扱いにする（新着が来るまで再提案しない）" onClick={(e) => { e.stopPropagation(); onAckSug && onAckSug(p.id); }}><X size={13} strokeWidth={2.2} /></button>
         </div>
       )}
       {lastIsClient && p.rsug && (
@@ -2697,11 +2787,11 @@ function GroupAssist({ p, onSetStatus, onOpenReply }) {
   );
 }
 
-function GroupHead({ project, lane, dragActive, onStartDrag, onOpen, onToggleProject }) {
+function GroupHead({ project, lane, dragActive, onStartDrag, onOpen, onToggleProject, onArrow }) {
   const lpTimer = useRef(null);
   const downInfo = useRef(null);
   const gdown = (e) => {
-    if (e.target.closest && e.target.closest("input, a, label, [data-gcheck]")) return; // 完了◯などは除外
+    if (e.target.closest && e.target.closest("input, a, label, [data-gcheck], [data-arrow]")) return; // 完了◯・矢印などは除外
     downInfo.current = { el: e.currentTarget, pointerId: e.pointerId, x: e.clientX, y: e.clientY };
     lpTimer.current = setTimeout(() => {
       if (downInfo.current && onStartDrag) onStartDrag(project.id, downInfo.current.el, downInfo.current.pointerId, lane, project.company, downInfo.current.x, downInfo.current.y);
@@ -2725,7 +2815,21 @@ function GroupHead({ project, lane, dragActive, onStartDrag, onOpen, onTogglePro
       )}
       <span style={S.taskGroupName}>{project.company}</span>
       <StatusIcon status={project.status} size={15} />
+      {!dragActive && onArrow && (
+        <ArrowPair onUp={(e) => onArrow(project.id, -1, e)} onDown={(e) => onArrow(project.id, 1, e)} />
+      )}
     </button>
+  );
+}
+
+// 極小の並び替え矢印（↑↓）。ドラッグの代替。DOM表示順で隣と入れ替える
+function ArrowPair({ onUp, onDown }) {
+  const h = (fn) => (e) => { e.stopPropagation(); e.preventDefault(); fn && fn(e); };
+  return (
+    <span style={S.arrowPair} data-arrow="1" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+      <span role="button" tabIndex={-1} style={S.arrowBtn} title="上へ" onClick={h(onUp)}><ChevronUp size={14} strokeWidth={2.2} /></span>
+      <span role="button" tabIndex={-1} style={S.arrowBtn} title="下へ" onClick={h(onDown)}><ChevronDown size={14} strokeWidth={2.2} /></span>
+    </span>
   );
 }
 
@@ -2751,12 +2855,12 @@ function TaskMetaChips({ t }) {
     </div>
   );
 }
-function TaskCard({ t, lane, onToggle, onOpen, onOpenTask, onEditTask, dragging, dragActive, onStartDrag, onChangeDue, onChangeStart, onChangeKind }) {
+function TaskCard({ t, lane, onToggle, onOpen, onOpenTask, onEditTask, dragging, dragActive, onStartDrag, onChangeDue, onChangeStart, onChangeKind, onArrow }) {
   // 長押し（400ms）で並べ替えドラッグ開始
   const lpTimer = useRef(null);
   const downInfo = useRef(null);
   const tdown = (e) => {
-    if (e.target.closest && e.target.closest("button, input, a, label")) return; // 操作系は除外
+    if (e.target.closest && e.target.closest("button, input, a, label, [data-arrow]")) return; // 操作系・矢印は除外
     downInfo.current = { el: e.currentTarget, pointerId: e.pointerId, x: e.clientX, y: e.clientY };
     lpTimer.current = setTimeout(() => {
       if (downInfo.current && onStartDrag) onStartDrag(t.project.id, t.id, downInfo.current.el, downInfo.current.pointerId, lane, t.title, downInfo.current.x, downInfo.current.y);
@@ -2799,6 +2903,9 @@ function TaskCard({ t, lane, onToggle, onOpen, onOpenTask, onEditTask, dragging,
         )}
         <TaskMetaChips t={t} />
       </div>
+      {!dragActive && !t.done && onArrow && (
+        <ArrowPair onUp={(e) => onArrow(t.id, -1, e)} onDown={(e) => onArrow(t.id, 1, e)} />
+      )}
     </div>
   );
 }
@@ -3122,6 +3229,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
   const [extractMsg, setExtractMsg] = useState("");
   const [pendingTasks, setPendingTasks] = useState([]); // [{id,title,on}] 抽出された候補（確認待ち）
   const [pendingGroup, setPendingGroup] = useState(""); // まとめ時の共通タスク名
+  const [pendingUrgent, setPendingUrgent] = useState(false); // 抽出元メッセージが急ぎか
   const [mergeMode, setMergeMode] = useState(false);    // 1つのタスクにまとめる
   const [copied, setCopied] = useState(false);
   const [autoSaved, setAutoSaved] = useState(false);
@@ -3306,11 +3414,11 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
 
   async function extractTasks() {
     if (!d.received.trim()) { setGenError("先に相手から届いたメッセージを貼り付けてください。"); return; }
-    setExtracting(true); setGenError(""); setExtractMsg(""); setPendingTasks([]); setMergeMode(false); setPendingGroup("");
+    setExtracting(true); setGenError(""); setExtractMsg(""); setPendingTasks([]); setMergeMode(false); setPendingGroup(""); setPendingUrgent(false);
     try {
       const text = await callClaude({
         maxTokens: 600,
-        system: "あなたはフリーランスのアシスタントです。届いたメッセージから、こちらが対応すべき『やるべきこと』を具体的なタスクに分解します。各タスクは短い命令形の日本語（例：見積りを作成する）。さらに、それらを1つにまとめる時の簡潔な共通タスク名（10文字前後、例：初稿の修正対応）も作ります。出力はJSONオブジェクトのみ：{\"group\":\"共通タスク名\",\"tasks\":[\"…\",\"…\"]}。前置き・説明・コードブロック記法は一切付けない。やるべきことが無ければ {\"group\":\"\",\"tasks\":[]} のみ。",
+        system: "あなたはフリーランスのアシスタントです。届いたメッセージから、こちらが対応すべき『やるべきこと』を具体的なタスクに分解します。各タスクは短い命令形の日本語（例：見積りを作成する）。さらに、それらを1つにまとめる時の簡潔な共通タスク名（10文字前後、例：初稿の修正対応）も作ります。加えて、メッセージに「至急」「本日中」「今日中」「なるべく早く」「急ぎ」等の急を要する依頼が含まれる場合のみ urgent を true にします（それ以外は false）。出力はJSONオブジェクトのみ：{\"group\":\"共通タスク名\",\"urgent\":false,\"tasks\":[\"…\",\"…\"]}。前置き・説明・コードブロック記法は一切付けない。やるべきことが無ければ {\"group\":\"\",\"urgent\":false,\"tasks\":[]} のみ。",
         user: `# 案件\n会社: ${d.company || "（未設定）"}\n業務: ${d.work || "（未設定）"}\n\n# 届いたメッセージ\n${d.received}`,
       });
       let obj = {};
@@ -3320,6 +3428,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
       titles = [...new Set(titles)];
       if (!titles.length) { setExtractMsg("対応が必要なタスクは見つかりませんでした。"); return; }
       setPendingGroup((obj && typeof obj.group === "string" && obj.group.trim()) ? obj.group.trim() : "対応事項");
+      setPendingUrgent(!!(obj && obj.urgent === true));
       // 即登録せず、確認用の候補としてセット（既定はすべて「反映」ON）
       setPendingTasks(titles.map((title) => ({ id: uid(), title, on: true })));
     } catch {
@@ -3329,17 +3438,19 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
   // 抽出候補の操作
   const togglePending = (id) => setPendingTasks((list) => list.map((t) => t.id === id ? { ...t, on: !t.on } : t));
   const editPending = (id, title) => setPendingTasks((list) => list.map((t) => t.id === id ? { ...t, title } : t));
-  const cancelPending = () => { setPendingTasks([]); setMergeMode(false); setPendingGroup(""); };
+  const cancelPending = () => { setPendingTasks([]); setMergeMode(false); setPendingGroup(""); setPendingUrgent(false); };
   // 「反映」する候補を実際にタスクへ登録
   function applyPending() {
     const chosen = pendingTasks.filter((t) => t.on && t.title.trim()).map((t) => t.title.trim());
     if (!chosen.length) { cancelPending(); return; }
+    // いつやる自動設定：急ぎ=今日／17時前=今日／17時以降=明日（手動追加のタスクには適用しない）
+    const autoStart = pendingUrgent ? dStr(0) : (new Date().getHours() < 17 ? dStr(0) : dStr(1));
     let newTasks;
     if (mergeMode) {
       const title = (pendingGroup && pendingGroup.trim()) || chosen[0];
-      newTasks = [{ id: uid(), title, done: false, due: "", start: "", lane: "today", kind: "task", note: chosen.map((c) => `・${c}`).join("\n"), repeat: null }];
+      newTasks = [{ id: uid(), title, done: false, due: "", start: autoStart, lane: "today", kind: "task", note: chosen.map((c) => `・${c}`).join("\n"), repeat: null }];
     } else {
-      newTasks = chosen.map((title) => ({ id: uid(), title, done: false, due: "", start: "", lane: "today", kind: "task", note: "", repeat: null }));
+      newTasks = chosen.map((title) => ({ id: uid(), title, done: false, due: "", start: autoStart, lane: "today", kind: "task", note: "", repeat: null }));
     }
     set("tasks", [...d.tasks, ...newTasks]);
     setExtractMsg(mergeMode ? "1件のタスクにまとめて登録しました。" : `${newTasks.length}件のタスクを登録しました。`);
@@ -3468,8 +3579,6 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
 
           <div style={S.infoRow}>
             <Clock size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
-            <DateField value={d.start} placeholder="いつやる" onChange={(v) => set("start", v)} />
-            <span style={S.taskDateSep}>／</span>
             <DateField value={d.deadline} placeholder="期限" onChange={(v) => set("deadline", v)} />
           </div>
 
@@ -3778,8 +3887,8 @@ function SettingsModal({ onClose, sync, syncState, onSaveSync, onSyncPush, onSyn
 /* ============================================================
    カレンダービュー（タスク期限・案件納期を月表示）
    ============================================================ */
-function CalendarView({ projects, onOpen }) {
-  const wide = useWideScreen();
+function CalendarView({ projects, onOpen, forceNarrow }) {
+  const wide = useWideScreen() && !forceNarrow;
   const now = new Date();
   const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() });
   const pad = (n) => String(n).padStart(2, "0");
@@ -3796,7 +3905,6 @@ function CalendarView({ projects, onOpen }) {
       const dates = [...new Set([t.start, t.due].filter(Boolean))];
       dates.forEach((dk) => push(dk, { kind: "task", label: t.title, color: C.accent, project: p }));
     });
-    if (p.start && p.id !== INBOX_ID && p.status !== "完了") push(p.start, { kind: "task", label: "着手", color: C.accent, project: p });
     if (p.deadline && p.id !== INBOX_ID && p.status !== "完了") push(p.deadline, { kind: "deadline", label: "納期", color: "#FF6B6B", project: p });
   });
 
@@ -4716,6 +4824,8 @@ function statusSuggestion(p) {
   const last = msgs[msgs.length - 1];
   const days = Math.round((TODAY.getTime() - new Date(last.at.slice(0, 10) + "T00:00:00").getTime()) / 86400000);
   if (!isFinite(days) || days > 30) return { mark: "unknown" };
+  // ✕で却下済み（＝返信済み扱い。アイコンリアクション等で返した場合に使う）。新着が来るまで再提案しない
+  if (p.sugAckAt && new Date(p.sugAckAt).getTime() >= new Date(last.at).getTime()) return { mark: "ok" };
   const dw = days <= 0 ? "今日" : days === 1 ? "昨日" : `${days}日前に`;
   if (last.who === "client") {
     // 相手待ち/支払い待ちに切り替えた時刻が相手の最新メッセージ以降なら「対応済み」とみなし提案しない
@@ -5226,6 +5336,12 @@ const S = {
   addLabel: {},
 
   main: { padding: "10px 16px 64px", maxWidth: 1120, margin: "0 auto", overflowAnchor: "none" },
+  mainTri: { maxWidth: 1720 }, // PC 3画面横並び時は広く使う
+  triRow: { display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr)", gap: 24, alignItems: "start" },
+  triCol: { minWidth: 0 },
+  // 並び替え矢印（↑↓）：極小・グレー。常時表示
+  arrowPair: { display: "inline-flex", alignItems: "center", gap: 2, flexShrink: 0, marginLeft: 6 },
+  arrowBtn: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, borderRadius: 6, color: C.ink3, cursor: "pointer", userSelect: "none" },
   mainWide: { maxWidth: "none", paddingLeft: 24, paddingRight: 24 },
   viewDots: { display: "flex", justifyContent: "center", gap: 7, marginBottom: 14 },
   focusFilterBar: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 },
