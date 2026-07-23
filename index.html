@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-23u"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23v"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1708,7 +1708,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
         if (cardEl && sy) {
           const r = cardEl.getBoundingClientRect();
           const delta = (r.top + r.height / 2) - sy;
-          if (Math.abs(delta) > 4) window.scrollBy(0, delta);
+          if (Math.abs(delta) > 4) scrollYNearest(cardEl || el, delta);
           const r2 = cardEl.getBoundingClientRect();
           if (ghost) { ghost.style.height = r2.height + "px"; ghost.style.top = Math.round(sy - r2.height / 2) + "px"; }
         }
@@ -2673,7 +2673,7 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
         if (grpEl && sy) {
           const r = grpEl.getBoundingClientRect();
           const delta = (r.top + r.height / 2) - sy;
-          if (Math.abs(delta) > 4) window.scrollBy(0, delta);
+          if (Math.abs(delta) > 4) scrollYNearest(grpEl || el, delta);
         }
       } catch {}
       ready = true;
@@ -2933,6 +2933,20 @@ function GroupHead({ project, lane, dragActive, onStartDrag, onOpen, onTogglePro
       )}
     </button>
   );
+}
+
+// 要素の最寄りのスクロール可能な祖先を縦スクロールする（無ければページ全体）。
+// PC3画面表示では各列が個別スクロールになるため、ドラッグ時の補正を列側にかける
+function scrollYNearest(el, delta) {
+  try {
+    let n = el && el.parentElement;
+    while (n && n !== document.body) {
+      const st = window.getComputedStyle(n);
+      if (/(auto|scroll)/.test(st.overflowY) && n.scrollHeight > n.clientHeight + 4) { n.scrollTop += delta; return; }
+      n = n.parentElement;
+    }
+  } catch {}
+  window.scrollBy(0, delta);
 }
 
 // 極小の並び替え矢印（↑↓）。ドラッグの代替。DOM表示順で隣と入れ替える
@@ -5558,12 +5572,13 @@ const S = {
   addLabel: {},
 
   main: { padding: "10px 16px 64px", maxWidth: 1120, margin: "0 auto", overflowAnchor: "none" },
-  mainTri: { maxWidth: 1720 }, // PC 3画面横並び時は広く使う
+  mainTri: { maxWidth: 1720, paddingBottom: 0 }, // PC 3画面横並び時：全体スクロールをやめ各列スクロールに
   triRow: { display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr)", gap: 24, alignItems: "start" },
-  triCol: { minWidth: 0 },
+  // 各列は個別スクロール（ヘッダ56px＋mainの上余白10pxを引いた高さ）
+  triCol: { minWidth: 0, height: "calc(100vh - 74px)", overflowY: "auto", overscrollBehavior: "contain", paddingRight: 4, paddingBottom: 40, scrollbarWidth: "thin", scrollbarColor: "#2A323D transparent" },
   // 3画面表示：タブ行をヘッダ直下に固定（スクロールしても見える）
-  triSticky: { position: "sticky", top: 56, zIndex: 15, background: C.bg, paddingTop: 2, paddingBottom: 4 },
-  triStickyTabs: { position: "sticky", top: 56, zIndex: 15, background: C.bg, paddingTop: 2, paddingBottom: 4, marginBottom: 10 },
+  triSticky: { position: "sticky", top: 0, zIndex: 15, background: C.bg, paddingTop: 2, paddingBottom: 4 },
+  triStickyTabs: { position: "sticky", top: 0, zIndex: 15, background: C.bg, paddingTop: 2, paddingBottom: 4, marginBottom: 10 },
   triColCal: { paddingTop: 48 }, // タブ行の高さぶん下げてカレンダーの頭を揃える
   // すべてタブのグループ枠：色バー＋左の細い縦ライン。paddingLeftとマイナスマージンを相殺してカード幅は不変
   // グループ全体を薄い色付きパネルで囲う。左右のマイナスマージンでカード幅は不変（外側余白を使う）
