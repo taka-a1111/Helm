@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-23i"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -740,8 +740,13 @@ export default function App() {
           if (!p) continue;
           let entry = null;
           if (mail.kind === "cw") {
-            entry = { who: "client", name: mail.client || "クラウドワークス", at: mail.at || "",
-              body: "（クラウドワークスに新着メッセージ — 本文はサイトを全選択コピーして貼り付けてください）", partial: true, src: "cwmail" };
+            // CW通知メールは「確認URL → 本文 → 同じURL」構造。2つのURL行の間を本文として抽出する
+            const cw = extractCwMail(mail.body || mail.excerpt || "");
+            entry = cw.body
+              ? { who: "client", name: mail.client || "クラウドワークス", at: mail.at || "",
+                  body: cw.body, partial: false, src: "cwmailbody", curl: cw.url }
+              : { who: "client", name: mail.client || "クラウドワークス", at: mail.at || "",
+                  body: "（クラウドワークスに新着メッセージ — 本文はサイトを全選択コピーして貼り付けてください）", partial: true, src: "cwmail", curl: cw.url };
           } else if (mail.kind === "lancers") {
             entry = { who: "client", name: mail.client || "ランサーズ", at: mail.at || "",
               body: mail.excerpt || "（ランサーズに新着メッセージ）", partial: true, src: "lancersmail" };
@@ -5023,6 +5028,20 @@ async function analyzeIncomingMsg(companyName, recentLog) {
 }
 
 // ==================== Gmail自動読み取り（Phase 2 完結） ====================
+// CW通知メールの本文抽出：crowdworks.jp/messages のURL行が2回出る間のテキストが相手の本文
+function extractCwMail(raw) {
+  try {
+    const lines = String(raw || "").split(/\r?\n/);
+    const idx = [];
+    lines.forEach((l, i) => { if (/https:\/\/crowdworks\.jp\/messages\//.test(l)) idx.push(i); });
+    const url = idx.length ? (lines[idx[0]].match(/https:\/\/crowdworks\.jp\/messages\/\S+/) || [""])[0] : "";
+    if (idx.length < 2) return { body: "", url };
+    const mid = lines.slice(idx[0] + 1, idx[1]).join("\n").trim();
+    if (!mid || /今後ともクラウドワークス|クラウドワークス事務局/.test(mid)) return { body: "", url };
+    return { body: mid, url };
+  } catch { return { body: "", url: "" }; }
+}
+
 // メールを案件に照合：クライアント名・差出人・件名を、案件名とログの登場人物に突き合わせる
 function matchMailToProject(mail, projects) {
   const norm = (s) => (s || "").toLowerCase().replace(/[\s　]/g, "");
@@ -5056,6 +5075,9 @@ const replyLinkOf = (p) => {
     const hit = ls.find((l) => (l.url || "").includes("#!rid" + lastCw.rid));
     return hit || { id: "__cwroom__", label: "Chatwork", url: "https://www.chatwork.com/#!rid" + lastCw.rid };
   }
+  // クラウドワークス：通知メール由来の最新メッセージにスレッドURLがあれば該当スレッドへ直行
+  const lastCwMail = [...((p && p.msgs) || [])].reverse().find((m) => m.who === "client" && m.curl);
+  if (lastCwMail) return { id: "__cwmsg__", label: "クラウドワークス", url: lastCwMail.curl };
   return ls.find((l) => l.kind === "reply")
     || ls.find((l) => /chatwork\.com/.test(l.url))
     || ls.find((l) => /crowdworks\.jp|lancers\.jp/.test(l.url))
