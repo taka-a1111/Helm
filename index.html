@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-23aa"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23ab"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1001,6 +1001,15 @@ export default function App() {
   const [ptr, setPtr] = useState(0);          // 引っ張り量(px表示用)
   const [ptrBusy, setPtrBusy] = useState(false);
   const ptrRef = useRef(0); const ptrBusyRef = useRef(false); const ptrStartY = useRef(null);
+  // その場更新（同期→Chatwork→Gmail）。引っ張り更新とPCヘッダの↻ボタンで共用
+  const runRefresh = async () => {
+    if (ptrBusyRef.current) return;
+    ptrBusyRef.current = true; setPtrBusy(true);
+    try { await cloudPull(null, { force: true }); } catch {}
+    try { if (cwPullRef.current) await cwPullRef.current(); } catch {}
+    try { if (gmailPullRef.current) await gmailPullRef.current(); } catch {}
+    setTimeout(() => { ptrBusyRef.current = false; setPtrBusy(false); }, 500);
+  };
   useEffect(() => {
     const setP = (v) => { ptrRef.current = v; setPtr(v); };
     const cancel = () => { ptrStartY.current = null; setP(0); };
@@ -1021,11 +1030,7 @@ export default function App() {
       const armed = ptrRef.current >= 55 && !document.querySelector("[data-dragghost]");
       cancel();
       if (!armed || ptrBusyRef.current) return;
-      ptrBusyRef.current = true; setPtrBusy(true);
-      try { await cloudPull(null, { force: true }); } catch {}
-      try { if (cwPullRef.current) await cwPullRef.current(); } catch {}
-      try { if (gmailPullRef.current) await gmailPullRef.current(); } catch {}
-      setTimeout(() => { ptrBusyRef.current = false; setPtrBusy(false); }, 500);
+      await runRefresh();
     };
     document.addEventListener("touchstart", ts, { passive: true });
     document.addEventListener("touchmove", tm, { passive: true });
@@ -1483,6 +1488,12 @@ export default function App() {
           <div style={S.brandMark}>H</div>
           <div style={S.brandDate}>{(() => { const d = new Date(); return `${d.getMonth() + 1}月${d.getDate()}日（${WD_JP[d.getDay()]}）`; })()}</div>
         </div>
+        {wide && (
+          <button style={S.headerRefresh} title="その場で更新（同期＋Chatwork＋Gmail）" onClick={runRefresh} disabled={ptrBusy}>
+            <Repeat size={15} strokeWidth={2.4} style={ptrBusy ? { animation: "helmspin 0.9s linear infinite" } : {}} />
+            {ptrBusy ? "更新中…" : "更新"}
+          </button>
+        )}
         {wide && (
           <div style={S.headerKpi} title="進行中の案件の見込み合計">
             <Coins size={16} color="#E8ECF2" strokeWidth={2.2} />
@@ -5484,6 +5495,7 @@ function blankDraft() {
 }
 function Fonts() {
   return (<style>{`
+      @keyframes helmspin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
@@ -5530,6 +5542,7 @@ const S = {
   brandDate: { fontFamily: F.disp, fontWeight: 700, fontSize: 15, color: C.ink, letterSpacing: 0.2, whiteSpace: "nowrap" },
   brandLabel: { fontFamily: F.disp, fontWeight: 800, fontSize: 15, color: C.ink, letterSpacing: 0.3, whiteSpace: "nowrap" },
   headerKpi: { position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)", display: "inline-flex", alignItems: "center", gap: 8, background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 10, padding: "5px 14px", whiteSpace: "nowrap" },
+  headerRefresh: { display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, background: "transparent", color: C.ink2, borderRadius: 9, padding: "6px 12px", fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer" },
   headerKpiLabel: { fontSize: 12, color: C.ink2, fontWeight: 600 },
   headerKpiValue: { fontFamily: F.disp, fontWeight: 800, fontSize: 15, color: C.ink, letterSpacing: 0.3, fontVariantNumeric: "tabular-nums" },
   headerKpiDivider: { width: 1, height: 16, background: C.line, margin: "0 2px" },
