@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-23r"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23s"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1633,7 +1633,8 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
   const [dragTaskId, setDragTaskId] = useState(null);
   // タスク行の長押しドラッグ：行の上＝並べ替え／別案件カードの上＝その案件へ移動
   const startTaskDrag = (pid, tid, el, pointerId, title, sx, sy) => {
-    try { el && el.setPointerCapture && pointerId != null && el.setPointerCapture(pointerId); } catch {}
+    // キャプチャは行要素ではなくbodyに取る：案件またぎ移動で行が再マウントされてもドラッグが中断しない
+    try { if (pointerId != null && document.body && document.body.setPointerCapture) document.body.setPointerCapture(pointerId); } catch {}
     setDragTaskId(tid);
     const ghost = makeRowGhost(el, sy || 0);
     const move = (ev) => {
@@ -1690,7 +1691,8 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
   };
 
   const startDrag = (pid, el, pointerId, sx, sy) => {
-    try { el && el.setPointerCapture && pointerId != null && el.setPointerCapture(pointerId); } catch {}
+    // キャプチャは行要素ではなくbodyに取る：案件またぎ移動で行が再マウントされてもドラッグが中断しない
+    try { if (pointerId != null && document.body && document.body.setPointerCapture) document.body.setPointerCapture(pointerId); } catch {}
     setSortMode("manual"); // 並べ替えたら手動順に切替（再ソートで戻らないように）
     setDragId(pid);
     const srcP = projects.find((pp) => pp.id === pid);
@@ -2577,7 +2579,8 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
 
   // 長押し→上下ドラッグでタスクを並べ替え（同一レーン内なら案件をまたいでも移動可）
   const startTaskDrag = (pid, tid, el, pointerId, dragLane, title, sx, sy) => {
-    try { el && el.setPointerCapture && pointerId != null && el.setPointerCapture(pointerId); } catch {}
+    // キャプチャは行要素ではなくbodyに取る：案件またぎ移動で行が再マウントされてもドラッグが中断しない
+    try { if (pointerId != null && document.body && document.body.setPointerCapture) document.body.setPointerCapture(pointerId); } catch {}
     setDragTid(tid);
     const ghost = makeRowGhost(el, sy || 0);
     const move = (ev) => {
@@ -2654,7 +2657,8 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
 
   // 長押し→上下ドラッグで案件グループ（案件名）を並べ替え。序列は案件配列そのものを更新するので全タブに反映される
   const startGroupDrag = (pid, el, pointerId, dragLane, name, sx, sy) => {
-    try { el && el.setPointerCapture && pointerId != null && el.setPointerCapture(pointerId); } catch {}
+    // キャプチャは行要素ではなくbodyに取る：案件またぎ移動で行が再マウントされてもドラッグが中断しない
+    try { if (pointerId != null && document.body && document.body.setPointerCapture) document.body.setPointerCapture(pointerId); } catch {}
     onSortManual && onSortManual(); // 手動並びへ切替（再ソートで戻らないように）
     setDragGid(pid);
     const ghost = makeRowGhost(el, sy || 0, name);
