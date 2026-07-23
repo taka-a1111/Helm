@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-23ag"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23ah"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -821,7 +821,7 @@ export default function App() {
         persist(cur.map((p) => p.id !== target.id ? p : {
           ...p, tsqSeen: cm.id,
           tsq: items.length ? { srcId: cm.id, items } : null,
-          rsug: (j.reply && String(j.reply).trim() && classifyReplyWeight(cm.body || "") !== "claude") ? { srcId: cm.id, text: String(j.reply).trim() } : null,
+          rsug: null, // 返信の下書きはHelmでは作らない（Claudeプロジェクトで作る運用）
           rneed: { srcId: cm.id, need: !!(j.reply && String(j.reply).trim()) },
         }));
       } catch (e) {
@@ -3314,17 +3314,8 @@ function LogSection({ d, onChange }) {
         </span>
         <ChevronRight size={14} color={C.ink3} strokeWidth={2.4}
           style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }} />
-        <button style={S.logConsultBtn} onClick={(e) => { e.stopPropagation(); consult(); }} title="案件の文脈をコピーしてClaudeで相談">
-          <Sparkles size={13} strokeWidth={2.4} />相談
-        </button>
       </div>
       {open && <div style={S.logWrap}>
-        {lastIsClient && weight && (
-          <div style={S.logBadge}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: weight === "claude" ? C.accent : "#51CF66", flexShrink: 0 }} />
-            {weight === "claude" ? "内容が重ため：Claudeでの相談がおすすめ" : "Helmの返信アシストで返せそうです"}
-          </div>
-        )}
         {msgs.length > 4 && !showAll && (
           <button style={S.logShowAll} onClick={() => setShowAll(true)}>すべて表示（{msgs.length}件）</button>
         )}
@@ -3836,7 +3827,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
           {!isNew && replyNeeded(d) && (
             <button style={S.drawerReplyBar} onClick={() => onOpenReply && onOpenReply(d.id)}>
               <Reply size={15} strokeWidth={2.4} style={{ flexShrink: 0 }} />
-              <span style={{ flex: 1, minWidth: 0, textAlign: "left" }}>返信アシスト{d.rsug ? "（候補あり）" : ""}</span>
+              <span style={{ flex: 1, minWidth: 0, textAlign: "left" }}>返信アシスト</span>
               <ChevronRight size={15} strokeWidth={2.4} style={{ flexShrink: 0 }} />
             </button>
           )}
@@ -5146,7 +5137,7 @@ const driveFolderLinkOf = (p) => ((p && p.links) || []).find((l) => /drive\.goog
 // --- ログの新着（相手の最新メッセージ）から依頼を検出しタスク候補を作る（Sonnet・承認制） ---
 // 粒度ルール：報告タイミングが同じものは1件にまとめ、内訳は詳細(note)へ。1メッセージから原則1件。
 async function analyzeIncomingMsg(companyName, recentLog, openTitles) {
-  const sys = 'あなたはフリーランス（高崎・屋号インフォサクセス）の案件管理アシスタントです。クライアントとの直近のやり取りログを読み、(1)いま残っている宿題のタスク化 (2)返信文の下書き を作り、JSONだけを出力します。説明やコードブロック記法は付けないこと。\n{"tasks":[{"title":"タスク名（25字以内）","note":"内訳の箇条書き（各行を・で始め改行区切り。※既に完了報告済みの項目は含めない。内訳が1つだけ・不要なら空文字）","due":"YYYY-MM-DD（メッセージに期限・締切が明記されている場合のみ。無ければ空文字）","urgent":true|false}],"reply":"返信文の下書き。空文字の条件は後述"}\nタスクの分け方（重要）：同じ成果物・同じ資料への複数の指示は1件にまとめて内訳をnoteに入れる。ただし別の成果物・別の資料・別の対象物への指示は必ず別々のタスクに分ける（例：「サウナリストの修正」と「WEBセミナー資料の修正」は2件に分ける）。タスクが無ければ空配列 []。\n重複禁止（重要）：ユーザー入力に「登録済みタスク」の一覧が渡された場合、それと同じ内容・実質同じ作業のタスクは絶対に提案しない（言い回しが違っても作業が同じなら提案しない）。全て登録済みなら空配列。\nタスク判定基準（重要）：ログ全体を時系列で読み、相手からの依頼のうち「その後に自分（高崎）が完了・提出・送付・反映済みと報告していないもの」だけをタスク化する。全て対応済み、または挨拶・お礼・進捗確認・支払い連絡のみなら tasks は空配列。\nurgentの規則：至急・本日中・今日中・ASAPなど緊急性が高い表現があればtrue、通常はfalse。今日は' + dStr(0) + '。\n返信(reply)の規則：ログの最後の発言が相手で、自分がまだ返信していない場合のみ下書きを作る。最後の発言が自分（返信済み）の場合、返信不要な自動通知のみの場合、または「よろしくお願いします」「ありがとうございます」等の締めの挨拶・お礼のみで質問・依頼・確認事項を含まない場合は空文字。文体はログ内の自分の返信と同じトーン・改行リズムを厳密に守る（「お世話になっております。」で始め「引き続きよろしくお願いいたします。」等で締める）。依頼への承諾・要点の復唱を簡潔に。自分の最後の返信より後に相手から複数のメッセージが届いている場合は、その全メッセージに1通でまとめて返信する（各メッセージの内容に漏れなく応答する）。金額・条件など判断が必要な点は断定せず「確認のうえ改めてご連絡いたします」とする。事実の捏造禁止。';
+  const sys = 'あなたはフリーランス（高崎・屋号インフォサクセス）の案件管理アシスタントです。クライアントとの直近のやり取りログを読み、いま残っている宿題のタスク化を行い、JSONだけを出力します。説明やコードブロック記法は付けないこと。\n{"tasks":[{"title":"タスク名（25字以内）","note":"内訳の箇条書き（各行を・で始め改行区切り。※既に完了報告済みの項目は含めない。内訳が1つだけ・不要なら空文字）","due":"YYYY-MM-DD（メッセージに期限・締切が明記されている場合のみ。無ければ空文字）","urgent":true|false}]}\nタスクの分け方（重要）：同じ成果物・同じ資料への複数の指示は1件にまとめて内訳をnoteに入れる。ただし別の成果物・別の資料・別の対象物への指示は必ず別々のタスクに分ける（例：「サウナリストの修正」と「WEBセミナー資料の修正」は2件に分ける）。タスクが無ければ空配列 []。\n重複禁止（重要）：ユーザー入力に「登録済みタスク」の一覧が渡された場合、それと同じ内容・実質同じ作業のタスクは絶対に提案しない（言い回しが違っても作業が同じなら提案しない）。全て登録済みなら空配列。\nタスク判定基準（重要）：ログ全体を時系列で読み、相手からの依頼のうち「その後に自分（高崎）が完了・提出・送付・反映済みと報告していないもの」だけをタスク化する。全て対応済み、または挨拶・お礼・進捗確認・支払い連絡のみなら tasks は空配列。\nurgentの規則：至急・本日中・今日中・ASAPなど緊急性が高い表現があればtrue、通常はfalse。今日は' + dStr(0) + '。';
   const taskCtx = (openTitles && openTitles.length) ? `\n\n登録済みタスク（これらと同内容は提案しない）:\n${openTitles.map((t) => "・" + t).join("\n")}` : "";
   const out = await callClaude({ system: sys, user: `案件「${companyName || ""}」の直近のやり取り（時系列）:\n\n${recentLog}${taskCtx}`, maxTokens: 900 });
   const clean = out.replace(/```json|```/g, "").trim();
