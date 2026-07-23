@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-23k"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23l"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -3029,6 +3029,26 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent }) {
     }
     setBusy(false);
   };
+  // Claudeのグループチャットで返信を作る：定型プロンプト＋相手の本文をコピーし、登録済みClaudeリンクを開く
+  const claudeQuick = async () => {
+    const allM = project.msgs || [];
+    let lm = -1;
+    for (let i = allM.length - 1; i >= 0; i--) { if (allM[i].who === "me") { lm = i; break; } }
+    const pending = allM.slice(lm + 1)
+      .filter((m) => m.who === "client" && m.src !== "cwmail" && m.src !== "lancersnotice" && (m.body || "").trim())
+      .map((m) => m.body.trim()).join("\n\n");
+    if (!pending) { setConsultNote("相手のメッセージ本文がログにありません。先に本文を取り込んでください"); return; }
+    const prompt = "次のメッセージを頂きました。それに対する返信文を作ってください。簡潔に書いてください。\n\n" + pending;
+    const ok = await copyText(prompt);
+    const link = claudeProjectLinkOf(project);
+    setConsultNote(ok
+      ? (link ? "プロンプトをコピーしました。開いたClaudeに貼り付けてください" : "プロンプトをコピーしました。Claudeに貼り付けてください（リンク欄にClaudeのURLを登録すると自動で開きます）")
+      : "コピーに失敗しました");
+    if (link) {
+      const iu = isAndroidUA() ? claudeIntentUrl(link.url) : null;
+      if (iu) window.location.href = iu; else window.open(link.url, "_blank", "noopener");
+    }
+  };
   const consult = async () => {
     const ok = await copyText(buildClaudeContext(project));
     const link = claudeProjectLinkOf(project);
@@ -3102,6 +3122,9 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent }) {
             const heavy = classifyReplyWeight(pending) === "claude";
             return (
               <div style={S.rshChoice}>
+                <button style={S.rshChoiceMain} onClick={claudeQuick}>
+                  <MessageCircle size={14} strokeWidth={2.4} />Claudeで返信を作る（本文コピー＋開く・プラン内）
+                </button>
                 <div style={S.rshJudge}>
                   <span style={{ width: 7, height: 7, borderRadius: "50%", background: heavy ? C.accent : "#51CF66", flexShrink: 0 }} />
                   {heavy ? "重要な判断（金額・方針・構成など）を含む可能性があります" : "定型的な内容と判定しました"}
