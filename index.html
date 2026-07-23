@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-23ab"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23ac"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1542,7 +1542,11 @@ export default function App() {
           </div>
         ) : (
           <>
-            {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
+            {view === "focus" && (
+              <div style={S.mobileStickyTabs}>
+                <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />
+              </div>
+            )}
             {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
             {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onClearRsug={clearRsug} onAckSug={ackSug} heldRank={held.projRank} />}
             {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
@@ -5578,6 +5582,8 @@ const S = {
   triCol: { minWidth: 0, height: "calc(100vh - 74px)", overflowY: "auto", overscrollBehavior: "contain", paddingRight: 4, paddingBottom: 40, scrollbarWidth: "thin", scrollbarColor: "#2A323D transparent" },
   // 3画面表示：タブ行をヘッダ直下に固定（スクロールしても見える）
   triSticky: { position: "sticky", top: 0, zIndex: 15, background: C.bg, paddingTop: 2, paddingBottom: 4 },
+  // 通常表示（スマホ等）：タブ行をヘッダ直下に固定。左右いっぱいに広げて下の内容が透けないようにする
+  mobileStickyTabs: { position: "sticky", top: 52, zIndex: 15, background: C.bg, margin: "0 -16px", padding: "2px 16px 4px" },
   triStickyTabs: { position: "sticky", top: 0, zIndex: 15, background: C.bg, paddingTop: 2, paddingBottom: 4, marginBottom: 10 },
   // すべてタブのグループ枠：色バー＋左の細い縦ライン。paddingLeftとマイナスマージンを相殺してカード幅は不変
   // グループ全体を薄い色付きパネルで囲う。左右のマイナスマージンでカード幅は不変（外側余白を使う）
