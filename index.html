@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-23ah"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23ai"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -531,10 +531,20 @@ export default function App() {
   useEffect(() => { try { window.scrollTo(0, 0); const m = document.querySelector("main"); if (m) m.scrollTop = 0; } catch {} }, [view]);
   // 追従バー（フィルタチップ）をヘッダー直下に貼り付けるため、ヘッダー実高を CSS 変数に反映
   useEffect(() => {
-    const setH = () => { try { const el = headerRef.current; if (el) document.documentElement.style.setProperty("--headerH", el.offsetHeight + "px"); } catch {} };
+    const setH = () => { try { const el = headerRef.current; if (el) document.documentElement.style.setProperty("--headerH", Math.round(el.getBoundingClientRect().height) + "px"); } catch {} };
     setH();
+    const raf = requestAnimationFrame(setH);
+    const t1 = setTimeout(setH, 300);
+    const t2 = setTimeout(setH, 1200);
+    try { if (document.fonts && document.fonts.ready) document.fonts.ready.then(setH); } catch {}
+    let ro = null;
+    try { if (window.ResizeObserver && headerRef.current) { ro = new ResizeObserver(setH); ro.observe(headerRef.current); } } catch {}
     window.addEventListener("resize", setH);
-    return () => window.removeEventListener("resize", setH);
+    return () => {
+      window.removeEventListener("resize", setH);
+      cancelAnimationFrame(raf); clearTimeout(t1); clearTimeout(t2);
+      try { if (ro) ro.disconnect(); } catch {}
+    };
   }, [wide, view]);
   const go = (v) => { if (v !== view) { setNavStack((s) => [...s, view]); setView(v); } };
   const winW = () => (typeof window !== "undefined" ? window.innerWidth : 400);
@@ -5955,7 +5965,7 @@ const S = {
 
   /* task tabs (Googleタスク風) */
   taskTabs: { display: "flex", gap: 7, overflowX: "auto", marginBottom: 14, paddingBottom: 2 },
-  filterChips: { position: "sticky", top: "var(--headerH, 56px)", zIndex: 18, display: "flex", gap: 2, overflowX: "auto", width: "100%", maxWidth: 720, margin: "0 auto 12px", background: C.bg, borderBottom: `1px solid ${C.line}` },
+  filterChips: { position: "sticky", top: "var(--headerH, 56px)", zIndex: 18, display: "flex", gap: 2, overflowX: "auto", width: "100%", maxWidth: 720, margin: "0 auto 12px", paddingTop: 2, background: C.bg, borderBottom: `1px solid ${C.line}`, boxShadow: `0 -6px 0 0 ${C.bg}` },
   filterChip: { flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderBottom: "3px solid transparent", background: "transparent", padding: "9px 13px 10px", fontSize: 15, fontWeight: 700, color: C.ink3, whiteSpace: "nowrap", cursor: "pointer", borderRadius: 0 },
   filterChipOn: { color: C.ink, borderBottom: `3px solid ${C.accent}` },
   filterChipCount: { fontSize: 12, fontWeight: 700, color: C.ink3 },
