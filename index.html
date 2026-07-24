@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-24l"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-24m"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -3208,6 +3208,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
   const genSeq = useRef(0);
   const [showChoice, setShowChoice] = useState(false);
   const [showCtx, setShowCtx] = useState(false);
+  const [prepared, setPrepared] = useState(false); // 返信文をコピーしたか（見に行くだけでは記録しない）
   const bodyRef = useRef(null);
   const targetRef = useRef(null);
   const [consultNote, setConsultNote] = useState("");
@@ -3244,6 +3245,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
     const iu = isAndroidUA() ? claudeIntentUrl(link.url) : null;
     if (iu) { await copyText(prompt); window.location.href = iu; }
     else { window.open(link.url, "_blank", "noopener"); await copyText(prompt); }
+    setPrepared(true);
     setConsultNote("プロンプトをコピーしました。開いたClaudeに貼り付けてください");
     // CW/ランサーズは自分の送信を検知できないので、ここで返信対応済みとして記録する
     if (onNoReply) { onNoReply(project.id); setSentNote("返信対応済みとして記録しました（次の新着まで出ません）"); }
@@ -3336,7 +3338,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
           {!busy && !err && text && !showChoice && (
             <>
               <div style={{ ...S.rshDraft, cursor: "pointer" }} title="タップでコピー"
-                onClick={async () => { const ok = await copyText(text); setSentNote(ok ? "返信候補をコピーしました" : "コピーできませんでした。長押しで選択してください"); }}>{text}</div>
+                onClick={async () => { const ok = await copyText(text); if (ok) setPrepared(true); setSentNote(ok ? "返信候補をコピーしました" : "コピーできませんでした。長押しで選択してください"); }}>{text}</div>
               {sentNote ? <div style={S.rshNote}>{sentNote}</div> : (autoNote && <div style={S.rshNote}>{autoNote}</div>)}
             </>
           )}
@@ -3383,9 +3385,12 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
           {rlink && (
             <a style={S.rshOpenBtn} href={rlink.url} target="_blank" rel="noopener noreferrer" title={rlink.url}
               onClick={() => {
+                // 返信文をコピーせずに開いた場合は「見に行っただけ」なので記録しない
+                if (!prepared) return;
                 // CW/ランサーズは送信を検知できないので、開いた時点を返信日時としてログに残す
                 const via = (rlinkLabel || "").replace(/を開く$/, "") || "リンク先";
                 onMarkSent && onMarkSent(project.id, `（${via}で返信）`);
+                setSentNote(`返信として記録しました（${via}）`);
               }}>
               <ExternalLink size={14} strokeWidth={2.4} />{rlinkLabel}
             </a>
