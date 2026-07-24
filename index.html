@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-24i"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-24j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -3138,6 +3138,17 @@ function AddTaskInline({ projects, onAdd, onCancel }) {
 /* ============================================================
    詳細・編集ドロワー
    ============================================================ */
+// 未返信の相手メッセージからClaude用プロンプトを作る。連投なら「まとめて1通で返す」指示にする
+function buildReplyPrompt(items) {
+  const list = (items || []).filter((m) => (m.body || "").trim());
+  if (!list.length) return "";
+  if (list.length === 1) {
+    return "次のメッセージを頂きました。それに対する返信文を作ってください。簡潔に書いてください。\n\n" + list[0].body.trim();
+  }
+  const body = list.map((m, i) => `【${i + 1}件目${m.at ? " " + fmtLogAt(m.at) : ""}】\n${m.body.trim()}`).join("\n\n");
+  return `次の${list.length}件のメッセージを頂きました。${list.length}件すべてに対する返信を、1つのメッセージにまとめて作ってください。簡潔に書いてください。\n\n${body}`;
+}
+
 // ==================== 返信アシストシート ====================
 // 直近のメッセージ＋返信候補＋コピー。候補が無ければ開いた瞬間に強制生成。
 // ログ1件の表示。相手／自分の境目をはっきりさせ、引用（>）行はまとめて折りたたむ
@@ -3218,11 +3229,10 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
     const allM = project.msgs || [];
     let lm = -1;
     for (let i = allM.length - 1; i >= 0; i--) { if (allM[i].who === "me") { lm = i; break; } }
-    const pending = allM.slice(lm + 1)
-      .filter((m) => m.who === "client" && m.src !== "cwmail" && m.src !== "lancersnotice" && (m.body || "").trim())
-      .map((m) => m.body.trim()).join("\n\n");
-    if (!pending) { setConsultNote("相手のメッセージ本文がログにありません。先に本文を取り込んでください"); return; }
-    const prompt = "次のメッセージを頂きました。それに対する返信文を作ってください。簡潔に書いてください。\n\n" + pending;
+    const pendingMsgs = allM.slice(lm + 1)
+      .filter((m) => m.who === "client" && m.src !== "cwmail" && m.src !== "lancersnotice" && (m.body || "").trim());
+    const prompt = buildReplyPrompt(pendingMsgs);
+    if (!prompt) { setConsultNote("相手のメッセージ本文がログにありません。先に本文を取り込んでください"); return; }
     const link = claudeProjectLinkOf(project) || ((project.links || []).find((l) => /claude\.ai\//.test(l.url || "")));
     // 未登録のまま新規チャットを開くと「開いたが送っていない」状態になりやすいので、登録を先に促す
     if (!link) {
