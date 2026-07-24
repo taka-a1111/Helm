@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-23an"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23ao"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -5654,7 +5654,7 @@ const S = {
 
   tabs: { display: "flex", gap: 4, background: C.panel2, padding: 4, borderRadius: 12, border: `1px solid ${C.line}`, flexShrink: 0 },
   tabsSp: { gap: 2, padding: 3, borderRadius: 10 },
-  tabSp: { padding: "6px 8px", borderRadius: 8 },
+  tabSp: { width: 36, height: 33, padding: 0, borderRadius: 8 },
   tab: {
     display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent",
     color: C.ink3, width: 48, height: 42, borderRadius: 10, transition: "color 0.12s, background 0.12s",
