@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-24j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-24k"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -3152,7 +3152,7 @@ function buildReplyPrompt(items) {
 // ==================== 返信アシストシート ====================
 // 直近のメッセージ＋返信候補＋コピー。候補が無ければ開いた瞬間に強制生成。
 // ログ1件の表示。相手／自分の境目をはっきりさせ、引用（>）行はまとめて折りたたむ
-function LogMsg({ m, target, dim, onSetWho, innerRef }) {
+function LogMsg({ m, target, tag, dim, onSetWho, innerRef }) {
   const me = m.who === "me";
   const [openQ, setOpenQ] = useState(false);
   const blocks = useMemo(() => {
@@ -3177,7 +3177,7 @@ function LogMsg({ m, target, dim, onSetWho, innerRef }) {
         </button>
         <span>{fmtLogAt(m.at)}</span>
         {m.partial && <span style={{ color: "#D9A23B" }}>一部省略</span>}
-        {target && <span style={S.logTargetTag}>← このメッセージに返信</span>}
+        {target && <span style={S.logTargetTag}>{tag || "← このメッセージに返信"}</span>}
       </div>
       {blocks.map((b, i) => {
         const body = b.lines.join("\n").replace(/^\n+|\n+$/g, "");
@@ -3308,8 +3308,14 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
         </div>
         <div style={S.rshBody} ref={bodyRef}>
           <div style={S.rshLabel}>
-            返信するメッセージ
-            {targetMsg && <span style={S.rshLabelSub}>{(targetMsg.name || "相手")}・{fmtLogAt(targetMsg.at)}</span>}
+            返信するメッセージ{recent.length > 1 ? ` ${recent.length}件` : ""}
+            {targetMsg && (
+              <span style={S.rshLabelSub}>
+                {recent.length > 1
+                  ? "まとめて1通で返信します"
+                  : `${targetMsg.name || "相手"}・${fmtLogAt(targetMsg.at)}`}
+              </span>
+            )}
           </div>
           {recent.length === 0 && <div style={S.rshEmpty}>ログがありません。やり取りを貼り付けるかChatworkリンクを登録してください</div>}
           {context.length > 0 && (showCtx
@@ -3319,7 +3325,11 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
               </>
             : <button style={S.rshCtxBtn} onClick={() => setShowCtx(true)}>これまでのやり取り {context.length}件を表示</button>
           )}
-          {recent.map((m) => <LogMsg key={m.id} m={m} target={m.id === targetId} onSetWho={onSetWho} innerRef={m.id === targetId ? targetRef : undefined} />)}
+          {recent.map((m, i) => (
+            <LogMsg key={m.id} m={m} target
+              tag={recent.length > 1 ? `${i + 1}件目${i === recent.length - 1 ? "・最新" : ""}` : "← このメッセージに返信"}
+              onSetWho={onSetWho} innerRef={i === 0 ? targetRef : undefined} />
+          ))}
           <div style={{ ...S.rshLabel, marginTop: 12 }}>返信候補</div>
           {busy && <div style={S.rshEmpty}>生成中…</div>}
           {!busy && err && <div style={{ ...S.rshEmpty, color: "#FF8A8A" }}>{err}</div>}
