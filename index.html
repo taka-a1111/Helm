@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-24a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-24b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -3133,7 +3133,7 @@ function AddTaskInline({ projects, onAdd, onCancel }) {
 // ==================== 返信アシストシート ====================
 // 直近のメッセージ＋返信候補＋コピー。候補が無ければ開いた瞬間に強制生成。
 // ログ1件の表示。相手／自分の境目をはっきりさせ、引用（>）行はまとめて折りたたむ
-function LogMsg({ m }) {
+function LogMsg({ m, target, dim }) {
   const me = m.who === "me";
   const [openQ, setOpenQ] = useState(false);
   const blocks = useMemo(() => {
@@ -3149,11 +3149,12 @@ function LogMsg({ m }) {
   }, [m.body]);
   const qLines = blocks.reduce((n, b) => n + (b.q ? b.lines.length : 0), 0);
   return (
-    <div style={{ ...S.logItem, ...(me ? S.logItemMe : S.logItemClient) }}>
+    <div style={{ ...S.logItem, ...(me ? S.logItemMe : S.logItemClient), ...(target ? S.logItemTarget : {}), ...(dim ? S.logItemDim : {}) }}>
       <div style={S.logMeta}>
         <span style={{ ...S.logWho, ...(me ? S.logWhoMe : {}) }}>{me ? "自分" : (m.name || "相手")}</span>
         <span>{fmtLogAt(m.at)}</span>
         {m.partial && <span style={{ color: "#D9A23B" }}>一部省略</span>}
+        {target && <span style={S.logTargetTag}>← このメッセージに返信</span>}
       </div>
       {blocks.map((b, i) => {
         const body = b.lines.join("\n").replace(/^\n+|\n+$/g, "");
@@ -3183,6 +3184,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
   const text = project.rsug ? project.rsug.text : "";
   const genSeq = useRef(0);
   const [showChoice, setShowChoice] = useState(false);
+  const [showCtx, setShowCtx] = useState(false);
   const [consultNote, setConsultNote] = useState("");
   const gen = async (model) => {
     if (busy) return;
@@ -3265,8 +3267,14 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
   const allMsgs = project.msgs || [];
   let lastMe = -1;
   for (let i = allMsgs.length - 1; i >= 0; i--) { if (allMsgs[i].who === "me") { lastMe = i; break; } }
-  const start = Math.max(0, Math.min(lastMe >= 0 ? lastMe : allMsgs.length - 4, allMsgs.length - 4));
-  const recent = allMsgs.slice(start);
+  // 返信対象＝自分の最後の返信より後に来た相手のメッセージ（その最新が主対象）
+  const unreplied = allMsgs.slice(lastMe + 1).filter((m) => m.who === "client");
+  const recent = unreplied.length ? unreplied : allMsgs.slice(-1);
+  const targetId = recent.length ? recent[recent.length - 1].id : null;
+  const ctxTo0 = recent.length ? allMsgs.findIndex((m) => m.id === recent[0].id) : -1;
+  const ctxTo = ctxTo0 < 0 ? allMsgs.length : ctxTo0;
+  const context = allMsgs.slice(Math.max(0, ctxTo - 3), ctxTo);
+  const targetMsg = recent.length ? recent[recent.length - 1] : null;
   const rlink = replyLinkOf(project);
   const rlinkLabel = (() => { if (!rlink) return ""; try { const li = linkInfo(rlink.url); return (li && li.label) || "リンクを開く"; } catch { return "リンクを開く"; } })();
   return (
@@ -3279,9 +3287,19 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
           <button style={S.iconBtn} onClick={onClose}><X size={18} /></button>
         </div>
         <div style={S.rshBody}>
-          <div style={S.rshLabel}>直近のメッセージ</div>
+          <div style={S.rshLabel}>
+            返信するメッセージ
+            {targetMsg && <span style={S.rshLabelSub}>{(targetMsg.name || "相手")}・{fmtLogAt(targetMsg.at)}</span>}
+          </div>
           {recent.length === 0 && <div style={S.rshEmpty}>ログがありません。やり取りを貼り付けるかChatworkリンクを登録してください</div>}
-          {recent.map((m) => <LogMsg key={m.id} m={m} />)}
+          {context.length > 0 && (showCtx
+            ? <>
+                {context.map((m) => <LogMsg key={m.id} m={m} dim />)}
+                <button style={S.rshCtxBtn} onClick={() => setShowCtx(false)}>これまでのやり取りを隠す</button>
+              </>
+            : <button style={S.rshCtxBtn} onClick={() => setShowCtx(true)}>これまでのやり取り {context.length}件を表示</button>
+          )}
+          {recent.map((m) => <LogMsg key={m.id} m={m} target={m.id === targetId} />)}
           <div style={{ ...S.rshLabel, marginTop: 12 }}>返信候補</div>
           {busy && <div style={S.rshEmpty}>生成中…</div>}
           {!busy && err && <div style={{ ...S.rshEmpty, color: "#FF8A8A" }}>{err}</div>}
@@ -6190,6 +6208,9 @@ const S = {
   logItemMe: { background: "rgba(107,138,255,0.09)", borderLeft: "3px solid rgba(107,138,255,0.55)" },
   logItemClient: { borderLeft: "3px solid rgba(217,162,59,0.55)" },
   logWho: { fontSize: 12.5, fontWeight: 800, color: "#D9A23B" },
+  logItemTarget: { borderLeft: `3px solid ${C.accent}`, background: "rgba(107,138,255,0.08)", boxShadow: "0 0 0 1px rgba(107,138,255,0.32)" },
+  logItemDim: { opacity: 0.62 },
+  logTargetTag: { marginLeft: "auto", fontSize: 11, fontWeight: 800, color: C.accent, background: "rgba(107,138,255,0.16)", borderRadius: 6, padding: "2px 7px", whiteSpace: "nowrap" },
   logWhoMe: { color: C.accent },
   logQuote: { fontSize: 12.5, color: C.ink3, whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.5, paddingLeft: 9, borderLeft: `2px solid ${C.line}` },
   logQuoteBtn: { alignSelf: "flex-start", border: "none", background: "transparent", color: C.ink3, fontSize: 12, fontWeight: 700, padding: "2px 0", cursor: "pointer" },
@@ -6237,7 +6258,9 @@ const S = {
   cardRsugGen: { display: "inline-flex", alignItems: "center", gap: 5, marginTop: 9, border: "none", borderRadius: 8, background: "rgba(107,138,255,0.10)", color: C.accent, fontWeight: 700, fontSize: 12.5, padding: "6px 11px", cursor: "pointer" },
   cardRsugMsg: { marginTop: 5, fontSize: 12, color: C.ink3 },
   rshBody: { flex: 1, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 },
-  rshLabel: { fontSize: 12, fontWeight: 700, color: C.ink3, letterSpacing: 0.3 },
+  rshLabel: { display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", fontSize: 12, fontWeight: 700, color: C.ink3, letterSpacing: 0.3 },
+  rshLabelSub: { fontSize: 11.5, fontWeight: 600, color: C.ink3, opacity: 0.85 },
+  rshCtxBtn: { alignSelf: "flex-start", border: "none", background: "transparent", color: C.ink3, fontSize: 12.5, fontWeight: 700, padding: "3px 0", cursor: "pointer" },
   rshEmpty: { fontSize: 13.5, color: C.ink3, padding: "10px 2px" },
   rshDraft: { fontSize: 14.5, color: C.ink, whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.65, padding: "11px 13px", borderRadius: 11, background: "rgba(107,138,255,0.10)", border: "1px solid rgba(107,138,255,0.45)" },
   rshRegen: { display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: 9, background: C.panel2, color: C.ink2, fontWeight: 700, fontSize: 13.5, padding: "9px 13px", cursor: "pointer" },
