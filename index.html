@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-24o"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-25a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1367,6 +1367,7 @@ export default function App() {
     persist((projectsRef.current || []).map((p) => p.id !== pid ? p : {
       ...p,
       msgs: [...(p.msgs || []), { id: uid(), who: "me", name: "高崎", at, body: text, src: "sent", partial: false }],
+      repliedAt: Date.now(),
     }));
   };
   const saveRsug = (pid, text) => {
@@ -5283,12 +5284,20 @@ function buildClaudeContext(p) {
 
 // 返信不要の即時判定：短い締めの挨拶・お礼のみ（質問・依頼を含まない）
 // 返信アシストを見せるべきか（未返信＋締め挨拶でない＋AIが不要判定していない）
+function atToTs(at) {
+  if (!at) return 0;
+  const m = String(at).match(/(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+  if (!m) return 0;
+  return new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)).getTime();
+}
 function replyNeeded(p) {
   const msgs = p.msgs || [];
   const last = msgs[msgs.length - 1];
   if (!last || last.who !== "client") return false;
   if (isClosingMsg(last.body)) return false;
   if (p.rneed && p.rneed.srcId === last.id && p.rneed.need === false) return false;
+  // 「リンクを開く/コピー」で返信した時刻より前の相手メッセージなら、取り込みラグとみなし要返信にしない
+  if (p.repliedAt && last.at && atToTs(last.at) <= p.repliedAt) return false;
   return true;
 }
 
