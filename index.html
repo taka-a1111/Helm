@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-24d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-24e"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1367,7 +1367,6 @@ export default function App() {
     persist((projectsRef.current || []).map((p) => p.id !== pid ? p : {
       ...p,
       msgs: [...(p.msgs || []), { id: uid(), who: "me", name: "高崎", at, body: text, src: "sent", partial: false }],
-      rsug: null,
     }));
   };
   const saveRsug = (pid, text) => {
@@ -2230,8 +2229,8 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
           <button style={{ ...S.cardRsugGen, marginTop: 0 }} onClick={(e) => { stop(e); onOpenReply && onOpenReply(p.id); }}>
             <Reply size={13} strokeWidth={2.4} />返信アシスト
           </button>
-          <button style={S.rsugSkip} title="返信不要（新着が来るまで再表示しない）"
-            onClick={(e) => { stop(e); onNoReply && onNoReply(p.id); }}>返信不要</button>
+          <button style={S.rsugSkip} title="返信済み・返信不要（次の新着まで出ません）"
+            onClick={(e) => { stop(e); onNoReply && onNoReply(p.id); }}>対応済み</button>
         </div>
       )}
       {!dragActive && showTasks.length > 0 && (
@@ -2943,8 +2942,8 @@ function GroupAssist({ p, onSetStatus, onOpenReply, onAckSug, onNoReply }) {
           <button style={{ ...S.cardRsugGen, marginTop: 0 }} onClick={() => onOpenReply && onOpenReply(p.id)}>
             <Reply size={13} strokeWidth={2.4} />返信アシスト
           </button>
-          <button style={S.rsugSkip} title="返信不要（新着が来るまで再表示しない）"
-            onClick={(e) => { e.stopPropagation(); onNoReply && onNoReply(p.id); }}>返信不要</button>
+          <button style={S.rsugSkip} title="返信済み・返信不要（次の新着まで出ません）"
+            onClick={(e) => { e.stopPropagation(); onNoReply && onNoReply(p.id); }}>対応済み</button>
         </div>
       )}
     </div>
@@ -3287,10 +3286,14 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
     }, 90);
     return () => { clearTimeout(t); if (raf) cancelAnimationFrame(raf); };
   }, [project.id, showCtx]);
+  const [sentNote, setSentNote] = useState("");
   const doCopy = async () => {
     if (!text) return;
     const ok = await copyText(text);
-    if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1600); }
+    if (!ok) return;
+    setCopied(true); setTimeout(() => setCopied(false), 1600);
+    // Helmは自分の送信を検知できないので、コピー＝返信したものとしてログに残す
+    if (onMarkSent) { onMarkSent(project.id, text); setSentNote("返信済みとして記録しました（アシストは次の新着まで出ません）"); }
   };
   // 直近表示：自分の最後の返信以降の相手メッセージを全部（＋直前の文脈少し）
   const allMsgs = project.msgs || [];
@@ -3335,7 +3338,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
           {!busy && !err && text && !showChoice && (
             <>
               <div style={S.rshDraft}>{text}</div>
-              {autoNote && <div style={S.rshNote}>{autoNote}</div>}
+              {sentNote ? <div style={S.rshNote}>{sentNote}</div> : (autoNote && <div style={S.rshNote}>{autoNote}</div>)}
             </>
           )}
           {!busy && (showChoice || !text) && (() => {
@@ -3374,8 +3377,8 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
           <button style={S.rshRegen} onClick={claudeNew} title="本文をコピーしてClaudeの新規チャットを開く">
             <MessageCircle size={14} strokeWidth={2.4} />Claude新規チャット
           </button>
-          <button style={S.rshSkipBtn} title="返信不要（新着が来るまで再表示しない）"
-            onClick={() => { onNoReply && onNoReply(project.id); onClose && onClose(); }}>返信不要</button>
+          <button style={S.rshSkipBtn} title="返信済み・返信不要（次の新着まで出ません）"
+            onClick={() => { onNoReply && onNoReply(project.id); onClose && onClose(); }}>対応済み</button>
           <div style={{ flex: 1 }} />
           <button style={S.rshCopyBtn} onClick={doCopy} disabled={!text || busy}>
             {copied ? <><Check size={15} strokeWidth={2.8} />コピー済</> : <><Copy size={15} strokeWidth={2.2} />コピー</>}
