@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-24e"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-24f"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -3233,6 +3233,8 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
     setConsultNote(link
       ? "プロンプトをコピーしました。開いたClaudeに貼り付けてください"
       : "プロンプトをコピーして新規チャットを開きました。プロジェクトURLを下に登録すると次回からそこが開きます");
+    // CW/ランサーズは自分の送信を検知できないので、ここで返信対応済みとして記録する
+    if (onNoReply) { onNoReply(project.id); setSentNote("返信対応済みとして記録しました（次の新着まで出ません）"); }
   };
   // フッター用：常に新規チャットで作る（本文コピー＋claude.ai/newを開く）
   const claudeNew = async () => {
@@ -3251,6 +3253,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
       window.open(nu, "_blank", "noopener");
       if (pending) await copyText("次のメッセージを頂きました。それに対する返信文を作ってください。簡潔に書いてください。\n\n" + pending);
     }
+    if (onNoReply) { onNoReply(project.id); setSentNote("返信対応済みとして記録しました（次の新着まで出ません）"); }
   };
   const consult = async () => {
     const ok = await copyText(buildClaudeContext(project));
@@ -3287,14 +3290,6 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
     return () => { clearTimeout(t); if (raf) cancelAnimationFrame(raf); };
   }, [project.id, showCtx]);
   const [sentNote, setSentNote] = useState("");
-  const doCopy = async () => {
-    if (!text) return;
-    const ok = await copyText(text);
-    if (!ok) return;
-    setCopied(true); setTimeout(() => setCopied(false), 1600);
-    // Helmは自分の送信を検知できないので、コピー＝返信したものとしてログに残す
-    if (onMarkSent) { onMarkSent(project.id, text); setSentNote("返信済みとして記録しました（アシストは次の新着まで出ません）"); }
-  };
   // 直近表示：自分の最後の返信以降の相手メッセージを全部（＋直前の文脈少し）
   const allMsgs = project.msgs || [];
   let lastMe = -1;
@@ -3369,6 +3364,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
                   </div>
                 )}
                 {consultNote && <div style={S.rshNote}>{consultNote}</div>}
+                {sentNote && <div style={S.rshNote}>{sentNote}</div>}
               </div>
             );
           })()}
@@ -3380,9 +3376,6 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
           <button style={S.rshSkipBtn} title="返信済み・返信不要（次の新着まで出ません）"
             onClick={() => { onNoReply && onNoReply(project.id); onClose && onClose(); }}>対応済み</button>
           <div style={{ flex: 1 }} />
-          <button style={S.rshCopyBtn} onClick={doCopy} disabled={!text || busy}>
-            {copied ? <><Check size={15} strokeWidth={2.8} />コピー済</> : <><Copy size={15} strokeWidth={2.2} />コピー</>}
-          </button>
           {rlink && (
             <a style={S.rshOpenBtn} href={rlink.url} target="_blank" rel="noopener noreferrer" title={rlink.url}>
               <ExternalLink size={14} strokeWidth={2.4} />{rlinkLabel}
