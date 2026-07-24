@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-24k"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-24l"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -3381,7 +3381,12 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
             onClick={() => { onNoReply && onNoReply(project.id); onClose && onClose(); }}>返信不要</button>
           <div style={{ flex: 1 }} />
           {rlink && (
-            <a style={S.rshOpenBtn} href={rlink.url} target="_blank" rel="noopener noreferrer" title={rlink.url}>
+            <a style={S.rshOpenBtn} href={rlink.url} target="_blank" rel="noopener noreferrer" title={rlink.url}
+              onClick={() => {
+                // CW/ランサーズは送信を検知できないので、開いた時点を返信日時としてログに残す
+                const via = (rlinkLabel || "").replace(/を開く$/, "") || "リンク先";
+                onMarkSent && onMarkSent(project.id, `（${via}で返信）`);
+              }}>
               <ExternalLink size={14} strokeWidth={2.4} />{rlinkLabel}
             </a>
           )}
