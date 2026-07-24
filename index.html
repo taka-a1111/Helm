@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-24g"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-24h"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -3224,35 +3224,18 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
     if (!pending) { setConsultNote("相手のメッセージ本文がログにありません。先に本文を取り込んでください"); return; }
     const prompt = "次のメッセージを頂きました。それに対する返信文を作ってください。簡潔に書いてください。\n\n" + pending;
     const link = claudeProjectLinkOf(project) || ((project.links || []).find((l) => /claude\.ai\//.test(l.url || "")));
-    // クリック直後（awaitの前）に開く：PCのポップアップブロック回避
-    const target = link ? link.url : "https://claude.ai/new";
-    if (!link) setClaudeReg(true); // 未登録：その場で登録できるUIも表示
-    const iu = isAndroidUA() ? claudeIntentUrl(target) : null;
-    if (iu) { await copyText(prompt); window.location.href = iu; }
-    else { window.open(target, "_blank", "noopener"); await copyText(prompt); }
-    setConsultNote(link
-      ? "プロンプトをコピーしました。開いたClaudeに貼り付けてください"
-      : "プロンプトをコピーして新規チャットを開きました。プロジェクトURLを下に登録すると次回からそこが開きます");
-    // CW/ランサーズは自分の送信を検知できないので、ここで返信対応済みとして記録する
-    if (onNoReply) { onNoReply(project.id); setSentNote("返信対応済みとして記録しました（次の新着まで出ません）"); }
-  };
-  // フッター用：常に新規チャットで作る（本文コピー＋claude.ai/newを開く）
-  const claudeNew = async () => {
-    const allM = project.msgs || [];
-    let lm = -1;
-    for (let i = allM.length - 1; i >= 0; i--) { if (allM[i].who === "me") { lm = i; break; } }
-    const pending = allM.slice(lm + 1)
-      .filter((m) => m.who === "client" && m.src !== "cwmail" && m.src !== "lancersnotice" && (m.body || "").trim())
-      .map((m) => m.body.trim()).join("\n\n");
-    const nu = "https://claude.ai/new";
-    const iu = isAndroidUA() ? claudeIntentUrl(nu) : null;
-    if (iu) {
-      if (pending) await copyText("次のメッセージを頂きました。それに対する返信文を作ってください。簡潔に書いてください。\n\n" + pending);
-      window.location.href = iu;
-    } else {
-      window.open(nu, "_blank", "noopener");
-      if (pending) await copyText("次のメッセージを頂きました。それに対する返信文を作ってください。簡潔に書いてください。\n\n" + pending);
+    // 未登録のまま新規チャットを開くと「開いたが送っていない」状態になりやすいので、登録を先に促す
+    if (!link) {
+      setClaudeReg(true);
+      setConsultNote("この案件のClaudeプロジェクトURLが未登録です。下に貼り付けて登録してください");
+      return;
     }
+    // クリック直後（awaitの前）に開く：PCのポップアップブロック回避
+    const iu = isAndroidUA() ? claudeIntentUrl(link.url) : null;
+    if (iu) { await copyText(prompt); window.location.href = iu; }
+    else { window.open(link.url, "_blank", "noopener"); await copyText(prompt); }
+    setConsultNote("プロンプトをコピーしました。開いたClaudeに貼り付けてください");
+    // CW/ランサーズは自分の送信を検知できないので、ここで返信対応済みとして記録する
     if (onNoReply) { onNoReply(project.id); setSentNote("返信対応済みとして記録しました（次の新着まで出ません）"); }
   };
   const consult = async () => {
@@ -3347,7 +3330,10 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
             return (
               <div style={S.rshChoice}>
                 <button style={S.rshChoiceMain} onClick={claudeQuick}>
-                  <MessageCircle size={14} strokeWidth={2.4} />Claudeで返信を作る（本文コピー＋開く・プラン内）
+                  <MessageCircle size={14} strokeWidth={2.4} />
+                  {claudeProjectLinkOf(project) || ((project.links || []).find((l) => /claude\.ai\//.test(l.url || "")))
+                    ? "Claudeで返信を作る（本文コピー＋開く）"
+                    : "Claudeプロジェクトを登録して返信を作る"}
                 </button>
                 {claudeReg && (
                   <div style={S.claudeRegRow}>
@@ -3358,7 +3344,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
                       if (!/^https:\/\/claude\.ai\//.test(u)) { setConsultNote("claude.ai のURLを貼り付けてください"); return; }
                       onAddLink && onAddLink(project.id, u, "Claude");
                       setClaudeReg(false); setClaudeUrl("");
-                      setConsultNote("Claudeリンクを登録して開きました。貼り付けてください");
+                      setConsultNote("Claudeリンクを登録して開きました。もう一度「Claudeで返信を作る」を押すと本文がコピーされます");
                       const iu = isAndroidUA() ? claudeIntentUrl(u) : null;
                       if (iu) window.location.href = iu; else window.open(u, "_blank", "noopener");
                     }}>登録して開く</button>
@@ -3371,9 +3357,6 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
           })()}
         </div>
         <div style={S.drawerFoot}>
-          <button style={S.rshRegen} onClick={claudeNew} title="本文をコピーしてClaudeの新規チャットを開く">
-            <MessageCircle size={14} strokeWidth={2.4} />Claude新規チャット
-          </button>
           <button style={S.rshSkipBtn} title="返信済み・返信不要（次の新着まで出ません）"
             onClick={() => { onNoReply && onNoReply(project.id); onClose && onClose(); }}>対応済み</button>
           <div style={{ flex: 1 }} />
