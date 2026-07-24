@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-24b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-24c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -332,7 +332,11 @@ function cleanMsgs(msgs) {
   const cleaned = msgs.map((m) => ({
     ...m,
     body: (m.body || "").split("\n").filter((l) => !/^Loading_\d+x\d+$/.test(l.trim())).join("\n").trim(),
-  })).filter((m) => m.body);
+  })).filter((m) => m.body).map((m) => (
+    // 自分の送信メールが相手として取り込まれることがあるので補正（本人が名乗っている本文で判定）
+    m.who === "client" && (isMeName(m.name) || /高崎です|インフォサクセスの高崎/.test((m.body || "").slice(0, 500)))
+      ? { ...m, who: "me" } : m
+  ));
   const out = [];
   const nrm = (s) => (s || "").replace(/\s+/g, " ").trim();
   for (const m of cleaned) {
@@ -1339,6 +1343,11 @@ export default function App() {
   // カードから返信案を消す／その場で生成する
   const clearRsug = (pid) =>
     persist((projectsRef.current || []).map((p) => p.id !== pid ? p : { ...p, rsug: null }));
+  // ログの送信者を自分↔相手に切り替える（取り込みの誤判定を手で直す用）
+  const setMsgWho = (pid, mid) =>
+    persist((projectsRef.current || []).map((p) => p.id !== pid ? p : {
+      ...p, msgs: (p.msgs || []).map((m) => m.id !== mid ? m : { ...m, who: m.who === "me" ? "client" : "me" }),
+    }));
   // 手動で「返信不要」にする（返信アシストを引っ込める＋古い返信候補を破棄）
   const markNoReply = (pid) =>
     persist((projectsRef.current || []).map((p) => {
@@ -1644,7 +1653,7 @@ export default function App() {
       {replyFor && (() => {
         const p = projects.find((x) => x.id === replyFor);
         if (!p) return null;
-        return <ReplySheet project={p} onClose={goBack} onSaveRsug={saveRsug} onMarkSent={markSent} onAddLink={addProjectLink} onNoReply={markNoReply} />;
+        return <ReplySheet project={p} onClose={goBack} onSaveRsug={saveRsug} onMarkSent={markSent} onAddLink={addProjectLink} onNoReply={markNoReply} onSetWho={(mid) => setMsgWho(p.id, mid)} />;
       })()}
 
       {/* ===== 右下フローティング＋ボタン（Googleカレンダー方式） ===== */}
@@ -3133,7 +3142,7 @@ function AddTaskInline({ projects, onAdd, onCancel }) {
 // ==================== 返信アシストシート ====================
 // 直近のメッセージ＋返信候補＋コピー。候補が無ければ開いた瞬間に強制生成。
 // ログ1件の表示。相手／自分の境目をはっきりさせ、引用（>）行はまとめて折りたたむ
-function LogMsg({ m, target, dim }) {
+function LogMsg({ m, target, dim, onSetWho }) {
   const me = m.who === "me";
   const [openQ, setOpenQ] = useState(false);
   const blocks = useMemo(() => {
@@ -3151,7 +3160,11 @@ function LogMsg({ m, target, dim }) {
   return (
     <div style={{ ...S.logItem, ...(me ? S.logItemMe : S.logItemClient), ...(target ? S.logItemTarget : {}), ...(dim ? S.logItemDim : {}) }}>
       <div style={S.logMeta}>
-        <span style={{ ...S.logWho, ...(me ? S.logWhoMe : {}) }}>{me ? "自分" : (m.name || "相手")}</span>
+        <button style={S.logWhoBtn} title={me ? "相手のメッセージに切り替える" : "自分が送ったメッセージに切り替える"}
+          onClick={() => onSetWho && onSetWho(m.id)}>
+          <span style={{ ...S.logWho, ...(me ? S.logWhoMe : {}) }}>{me ? "自分" : (m.name || "相手")}</span>
+          {onSetWho && <ArrowUpDown size={11} strokeWidth={2.6} style={{ transform: "rotate(90deg)", opacity: 0.5 }} />}
+        </button>
         <span>{fmtLogAt(m.at)}</span>
         {m.partial && <span style={{ color: "#D9A23B" }}>一部省略</span>}
         {target && <span style={S.logTargetTag}>← このメッセージに返信</span>}
@@ -3173,7 +3186,7 @@ function LogMsg({ m, target, dim }) {
   );
 }
 
-function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoReply }) {
+function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoReply, onSetWho }) {
   const [claudeReg, setClaudeReg] = useState(false);   // Claudeリンク未登録時の登録UI
   const [claudeUrl, setClaudeUrl] = useState("");
   const wide = useWideScreen();
@@ -3294,12 +3307,12 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
           {recent.length === 0 && <div style={S.rshEmpty}>ログがありません。やり取りを貼り付けるかChatworkリンクを登録してください</div>}
           {context.length > 0 && (showCtx
             ? <>
-                {context.map((m) => <LogMsg key={m.id} m={m} dim />)}
+                {context.map((m) => <LogMsg key={m.id} m={m} dim onSetWho={onSetWho} />)}
                 <button style={S.rshCtxBtn} onClick={() => setShowCtx(false)}>これまでのやり取りを隠す</button>
               </>
             : <button style={S.rshCtxBtn} onClick={() => setShowCtx(true)}>これまでのやり取り {context.length}件を表示</button>
           )}
-          {recent.map((m) => <LogMsg key={m.id} m={m} target={m.id === targetId} />)}
+          {recent.map((m) => <LogMsg key={m.id} m={m} target={m.id === targetId} onSetWho={onSetWho} />)}
           <div style={{ ...S.rshLabel, marginTop: 12 }}>返信候補</div>
           {busy && <div style={S.rshEmpty}>生成中…</div>}
           {!busy && err && <div style={{ ...S.rshEmpty, color: "#FF8A8A" }}>{err}</div>}
@@ -3424,7 +3437,11 @@ function LogSection({ d, onChange }) {
         {shown.map((m) => (
           <div key={m.id} style={{ ...S.logItem, ...(m.who === "me" ? S.logItemMe : S.logItemClient) }}>
             <div style={S.logMeta}>
-              <span style={{ ...S.logWho, ...(m.who === "me" ? S.logWhoMe : {}) }}>{m.who === "me" ? "自分" : (m.name || "相手")}</span>
+              <button style={S.logWhoBtn} title={m.who === "me" ? "相手のメッセージに切り替える" : "自分が送ったメッセージに切り替える"}
+                onClick={() => onChange(msgs.map((x) => x.id !== m.id ? x : { ...x, who: x.who === "me" ? "client" : "me" }))}>
+                <span style={{ ...S.logWho, ...(m.who === "me" ? S.logWhoMe : {}) }}>{m.who === "me" ? "自分" : (m.name || "相手")}</span>
+                <ArrowUpDown size={11} strokeWidth={2.6} style={{ transform: "rotate(90deg)", opacity: 0.5 }} />
+              </button>
               <span>{fmtLogAt(m.at)}</span>
               {m.partial && <span style={{ color: "#D9A23B" }}>一部省略</span>}
               <button style={S.logDel} title="このログを削除"
@@ -4899,7 +4916,7 @@ function claudeIntentUrl(url) {
 
 // ==================== やり取りログ（Phase 1） ====================
 // msg = { id, at:"YYYY-MM-DD HH:mm"（不明なら""）, who:"me"|"client"|"", name, body, src, partial }
-const ME_NAMES = ["Infosuccess", "インフォサクセス", "高崎"];
+const ME_NAMES = ["Infosuccess", "インフォサクセス", "高崎", "MFA23"];
 const isMeName = (s) => ME_NAMES.some((n) => (s || "").startsWith(n));
 const normBody = (s) => (s || "").replace(/\s+/g, " ").trim();
 const fmtLogAt = (at) => {
@@ -6208,6 +6225,7 @@ const S = {
   logItemMe: { background: "rgba(107,138,255,0.09)", borderLeft: "3px solid rgba(107,138,255,0.55)" },
   logItemClient: { borderLeft: "3px solid rgba(217,162,59,0.55)" },
   logWho: { fontSize: 12.5, fontWeight: 800, color: "#D9A23B" },
+  logWhoBtn: { display: "inline-flex", alignItems: "center", gap: 3, border: "none", background: "transparent", padding: 0, margin: 0, color: "inherit", cursor: "pointer" },
   logItemTarget: { borderLeft: `3px solid ${C.accent}`, background: "rgba(107,138,255,0.08)", boxShadow: "0 0 0 1px rgba(107,138,255,0.32)" },
   logItemDim: { opacity: 0.62 },
   logTargetTag: { marginLeft: "auto", fontSize: 11, fontWeight: 800, color: C.accent, background: "rgba(107,138,255,0.16)", borderRadius: 6, padding: "2px 7px", whiteSpace: "nowrap" },
