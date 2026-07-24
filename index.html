@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-24m"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-24n"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -3152,7 +3152,7 @@ function buildReplyPrompt(items) {
 // ==================== 返信アシストシート ====================
 // 直近のメッセージ＋返信候補＋コピー。候補が無ければ開いた瞬間に強制生成。
 // ログ1件の表示。相手／自分の境目をはっきりさせ、引用（>）行はまとめて折りたたむ
-function LogMsg({ m, target, tag, dim, onSetWho, innerRef }) {
+function LogMsg({ m, target, tag, dim, onSetWho, innerRef, excluded, onToggleExcl }) {
   const me = m.who === "me";
   const [openQ, setOpenQ] = useState(false);
   const blocks = useMemo(() => {
@@ -3178,6 +3178,11 @@ function LogMsg({ m, target, tag, dim, onSetWho, innerRef }) {
         <span>{fmtLogAt(m.at)}</span>
         {m.partial && <span style={{ color: "#D9A23B" }}>一部省略</span>}
         {target && <span style={S.logTargetTag}>{tag || "← このメッセージに返信"}</span>}
+        {onToggleExcl && (
+          <button style={{ ...S.logExclBtn, ...(excluded ? S.logExclBtnOn : {}) }}
+            title={excluded ? "返信対象に戻す" : "この案件と無関係なので返信対象から外す"}
+            onClick={onToggleExcl}>{excluded ? "対象に戻す" : "除外"}</button>
+        )}
       </div>
       {blocks.map((b, i) => {
         const body = b.lines.join("\n").replace(/^\n+|\n+$/g, "");
@@ -3209,6 +3214,8 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
   const [showChoice, setShowChoice] = useState(false);
   const [showCtx, setShowCtx] = useState(false);
   const [prepared, setPrepared] = useState(false); // 返信文をコピーしたか（見に行くだけでは記録しない）
+  const [excluded, setExcluded] = useState({}); // 返信対象から外したメッセージ（別案件が混ざっている時用）
+  const toggleExcl = (id) => setExcluded((e) => ({ ...e, [id]: !e[id] }));
   const bodyRef = useRef(null);
   const targetRef = useRef(null);
   const [consultNote, setConsultNote] = useState("");
@@ -3231,7 +3238,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
     let lm = -1;
     for (let i = allM.length - 1; i >= 0; i--) { if (allM[i].who === "me") { lm = i; break; } }
     const pendingMsgs = allM.slice(lm + 1)
-      .filter((m) => m.who === "client" && m.src !== "cwmail" && m.src !== "lancersnotice" && (m.body || "").trim());
+      .filter((m) => m.who === "client" && m.src !== "cwmail" && m.src !== "lancersnotice" && (m.body || "").trim() && !excluded[m.id]);
     const prompt = buildReplyPrompt(pendingMsgs);
     if (!prompt) { setConsultNote("相手のメッセージ本文がログにありません。先に本文を取り込んでください"); return; }
     const link = claudeProjectLinkOf(project) || ((project.links || []).find((l) => /claude\.ai\//.test(l.url || "")));
@@ -3291,9 +3298,10 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
   for (let i = allMsgs.length - 1; i >= 0; i--) { if (allMsgs[i].who === "me") { lastMe = i; break; } }
   // 返信対象＝自分の最後の返信より後に来た相手のメッセージ（その最新が主対象）
   const unreplied = allMsgs.slice(lastMe + 1).filter((m) => m.who === "client");
-  const recent = unreplied.length ? unreplied : allMsgs.slice(-1);
+  const recentAll = unreplied.length ? unreplied : allMsgs.slice(-1);
+  const recent = recentAll.filter((m) => !excluded[m.id]); // 除外を反映した実対象
   const targetId = recent.length ? recent[recent.length - 1].id : null;
-  const ctxTo0 = recent.length ? allMsgs.findIndex((m) => m.id === recent[0].id) : -1;
+  const ctxTo0 = recentAll.length ? allMsgs.findIndex((m) => m.id === recentAll[0].id) : -1;
   const ctxTo = ctxTo0 < 0 ? allMsgs.length : ctxTo0;
   const context = allMsgs.slice(Math.max(0, ctxTo - 3), ctxTo);
   const targetMsg = recent.length ? recent[recent.length - 1] : null;
@@ -3311,13 +3319,15 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
         <div style={S.rshBody} ref={bodyRef}>
           <div style={S.rshLabel}>
             返信するメッセージ{recent.length > 1 ? ` ${recent.length}件` : ""}
-            {targetMsg && (
-              <span style={S.rshLabelSub}>
-                {recent.length > 1
-                  ? "まとめて1通で返信します"
-                  : `${targetMsg.name || "相手"}・${fmtLogAt(targetMsg.at)}`}
-              </span>
-            )}
+            {recent.length === 0 && recentAll.length > 0
+              ? <span style={S.rshLabelSub}>すべて除外中。1件以上を対象に戻してください</span>
+              : targetMsg && (
+                <span style={S.rshLabelSub}>
+                  {recent.length > 1
+                    ? "まとめて1通で返信します"
+                    : `${targetMsg.name || "相手"}・${fmtLogAt(targetMsg.at)}`}
+                </span>
+              )}
           </div>
           {recent.length === 0 && <div style={S.rshEmpty}>ログがありません。やり取りを貼り付けるかChatworkリンクを登録してください</div>}
           {context.length > 0 && (showCtx
@@ -3327,11 +3337,21 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
               </>
             : <button style={S.rshCtxBtn} onClick={() => setShowCtx(true)}>これまでのやり取り {context.length}件を表示</button>
           )}
-          {recent.map((m, i) => (
-            <LogMsg key={m.id} m={m} target
-              tag={recent.length > 1 ? `${i + 1}件目${i === recent.length - 1 ? "・最新" : ""}` : "← このメッセージに返信"}
-              onSetWho={onSetWho} innerRef={i === 0 ? targetRef : undefined} />
-          ))}
+          {(() => {
+            let n = 0;
+            return recentAll.map((m, i) => {
+              const ex = !!excluded[m.id];
+              const idx = ex ? -1 : n++;
+              const tag = ex ? "除外中"
+                : recent.length > 1 ? `${idx + 1}件目${idx === recent.length - 1 ? "・最新" : ""}`
+                : "← このメッセージに返信";
+              return (
+                <LogMsg key={m.id} m={m} target={!ex} tag={tag} dim={ex}
+                  onSetWho={onSetWho} innerRef={i === 0 ? targetRef : undefined}
+                  excluded={ex} onToggleExcl={() => toggleExcl(m.id)} />
+              );
+            });
+          })()}
           <div style={{ ...S.rshLabel, marginTop: 12 }}>返信候補</div>
           {busy && <div style={S.rshEmpty}>生成中…</div>}
           {!busy && err && <div style={{ ...S.rshEmpty, color: "#FF8A8A" }}>{err}</div>}
@@ -6254,6 +6274,8 @@ const S = {
   logWhoBtn: { display: "inline-flex", alignItems: "center", gap: 3, border: "none", background: "transparent", padding: 0, margin: 0, color: "inherit", cursor: "pointer" },
   logItemTarget: { borderLeft: `3px solid ${C.accent}`, background: "rgba(107,138,255,0.08)", boxShadow: "0 0 0 1px rgba(107,138,255,0.32)" },
   logItemDim: { opacity: 0.62 },
+  logExclBtn: { marginLeft: 6, border: `1px solid ${C.line}`, borderRadius: 6, background: "transparent", color: C.ink3, fontSize: 11, fontWeight: 700, padding: "2px 8px", cursor: "pointer", whiteSpace: "nowrap" },
+  logExclBtnOn: { borderColor: C.accent, color: C.accent, background: "rgba(107,138,255,0.12)" },
   logTargetTag: { marginLeft: "auto", fontSize: 11, fontWeight: 800, color: C.accent, background: "rgba(107,138,255,0.16)", borderRadius: 6, padding: "2px 7px", whiteSpace: "nowrap" },
   logWhoMe: { color: C.accent },
   logQuote: { fontSize: 12.5, color: C.ink3, whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.5, paddingLeft: 9, borderLeft: `2px solid ${C.line}` },
