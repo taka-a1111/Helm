@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-24c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-24d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -3142,7 +3142,7 @@ function AddTaskInline({ projects, onAdd, onCancel }) {
 // ==================== 返信アシストシート ====================
 // 直近のメッセージ＋返信候補＋コピー。候補が無ければ開いた瞬間に強制生成。
 // ログ1件の表示。相手／自分の境目をはっきりさせ、引用（>）行はまとめて折りたたむ
-function LogMsg({ m, target, dim, onSetWho }) {
+function LogMsg({ m, target, dim, onSetWho, innerRef }) {
   const me = m.who === "me";
   const [openQ, setOpenQ] = useState(false);
   const blocks = useMemo(() => {
@@ -3158,7 +3158,7 @@ function LogMsg({ m, target, dim, onSetWho }) {
   }, [m.body]);
   const qLines = blocks.reduce((n, b) => n + (b.q ? b.lines.length : 0), 0);
   return (
-    <div style={{ ...S.logItem, ...(me ? S.logItemMe : S.logItemClient), ...(target ? S.logItemTarget : {}), ...(dim ? S.logItemDim : {}) }}>
+    <div ref={innerRef} style={{ ...S.logItem, ...(me ? S.logItemMe : S.logItemClient), ...(target ? S.logItemTarget : {}), ...(dim ? S.logItemDim : {}) }}>
       <div style={S.logMeta}>
         <button style={S.logWhoBtn} title={me ? "相手のメッセージに切り替える" : "自分が送ったメッセージに切り替える"}
           onClick={() => onSetWho && onSetWho(m.id)}>
@@ -3198,6 +3198,8 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
   const genSeq = useRef(0);
   const [showChoice, setShowChoice] = useState(false);
   const [showCtx, setShowCtx] = useState(false);
+  const bodyRef = useRef(null);
+  const targetRef = useRef(null);
   const [consultNote, setConsultNote] = useState("");
   const gen = async (model) => {
     if (busy) return;
@@ -3271,6 +3273,20 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
       });
     }
   }, [text, busy]);
+  // 開いた直後（と対象が変わったとき）に、返信すべき最新メッセージまで自動スクロール
+  useEffect(() => {
+    let raf = 0;
+    const t = setTimeout(() => {
+      raf = requestAnimationFrame(() => {
+        const el = targetRef.current, box = bodyRef.current;
+        if (!el || !box) return;
+        const er = el.getBoundingClientRect(), br = box.getBoundingClientRect();
+        const delta = (er.top - br.top) - 10;
+        if (delta > 4) box.scrollTop += delta;
+      });
+    }, 90);
+    return () => { clearTimeout(t); if (raf) cancelAnimationFrame(raf); };
+  }, [project.id, showCtx]);
   const doCopy = async () => {
     if (!text) return;
     const ok = await copyText(text);
@@ -3299,7 +3315,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
           <span style={S.drawerTitle}>返信アシスト — {project.company || "（無題）"}</span>
           <button style={S.iconBtn} onClick={onClose}><X size={18} /></button>
         </div>
-        <div style={S.rshBody}>
+        <div style={S.rshBody} ref={bodyRef}>
           <div style={S.rshLabel}>
             返信するメッセージ
             {targetMsg && <span style={S.rshLabelSub}>{(targetMsg.name || "相手")}・{fmtLogAt(targetMsg.at)}</span>}
@@ -3312,7 +3328,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
               </>
             : <button style={S.rshCtxBtn} onClick={() => setShowCtx(true)}>これまでのやり取り {context.length}件を表示</button>
           )}
-          {recent.map((m) => <LogMsg key={m.id} m={m} target={m.id === targetId} onSetWho={onSetWho} />)}
+          {recent.map((m) => <LogMsg key={m.id} m={m} target={m.id === targetId} onSetWho={onSetWho} innerRef={m.id === targetId ? targetRef : undefined} />)}
           <div style={{ ...S.rshLabel, marginTop: 12 }}>返信候補</div>
           {busy && <div style={S.rshEmpty}>生成中…</div>}
           {!busy && err && <div style={{ ...S.rshEmpty, color: "#FF8A8A" }}>{err}</div>}
