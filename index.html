@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-24n"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-24o"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -3214,6 +3214,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
   const [showChoice, setShowChoice] = useState(false);
   const [showCtx, setShowCtx] = useState(false);
   const [prepared, setPrepared] = useState(false); // 返信文をコピーしたか（見に行くだけでは記録しない）
+  const [showDiag, setShowDiag] = useState(false);   // ログ内訳の確認（返信済みなのに出る時の切り分け用）
   const [excluded, setExcluded] = useState({}); // 返信対象から外したメッセージ（別案件が混ざっている時用）
   const toggleExcl = (id) => setExcluded((e) => ({ ...e, [id]: !e[id] }));
   const bodyRef = useRef(null);
@@ -3330,6 +3331,25 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
               )}
           </div>
           {recent.length === 0 && <div style={S.rshEmpty}>ログがありません。やり取りを貼り付けるかChatworkリンクを登録してください</div>}
+          {(() => {
+            const all = project.msgs || [];
+            const meN = all.filter((m) => m.who === "me").length;
+            const clN = all.filter((m) => m.who === "client").length;
+            const last = all[all.length - 1];
+            return (
+              <div style={{ marginBottom: 2 }}>
+                <button style={S.rshCtxBtn} onClick={() => setShowDiag((v) => !v)}>
+                  {showDiag ? "内訳を隠す" : "返信済みなのに出る？ 内訳を見る"}
+                </button>
+                {showDiag && (
+                  <div style={{ ...S.rshNote, lineHeight: 1.7 }}>
+                    ログ全{all.length}件（自分{meN}・相手{clN}）／最後の発言：{last ? (last.who === "me" ? "自分" : "相手") + "・" + fmtLogAt(last.at) : "なし"}
+                    <br />相手の最新より後に自分の返信が無いとアシストが出ます。自分の返信がログに無い場合は、そのメッセージの送信者名をタップして「自分」に切り替えてください。
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {context.length > 0 && (showCtx
             ? <>
                 {context.map((m) => <LogMsg key={m.id} m={m} dim onSetWho={onSetWho} />)}
