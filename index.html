@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-24h"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-24i"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -2230,7 +2230,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
             <Reply size={13} strokeWidth={2.4} />返信アシスト
           </button>
           <button style={S.rsugSkip} title="返信済み・返信不要（次の新着まで出ません）"
-            onClick={(e) => { stop(e); onNoReply && onNoReply(p.id); }}>対応済み</button>
+            onClick={(e) => { stop(e); onNoReply && onNoReply(p.id); }}>返信不要</button>
         </div>
       )}
       {!dragActive && showTasks.length > 0 && (
@@ -2943,7 +2943,7 @@ function GroupAssist({ p, onSetStatus, onOpenReply, onAckSug, onNoReply }) {
             <Reply size={13} strokeWidth={2.4} />返信アシスト
           </button>
           <button style={S.rsugSkip} title="返信済み・返信不要（次の新着まで出ません）"
-            onClick={(e) => { e.stopPropagation(); onNoReply && onNoReply(p.id); }}>対応済み</button>
+            onClick={(e) => { e.stopPropagation(); onNoReply && onNoReply(p.id); }}>返信不要</button>
         </div>
       )}
     </div>
@@ -3358,7 +3358,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
         </div>
         <div style={S.drawerFoot}>
           <button style={S.rshSkipBtn} title="返信済み・返信不要（次の新着まで出ません）"
-            onClick={() => { onNoReply && onNoReply(project.id); onClose && onClose(); }}>対応済み</button>
+            onClick={() => { onNoReply && onNoReply(project.id); onClose && onClose(); }}>返信不要</button>
           <div style={{ flex: 1 }} />
           {rlink && (
             <a style={S.rshOpenBtn} href={rlink.url} target="_blank" rel="noopener noreferrer" title={rlink.url}>
