@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-23al"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-23am"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1498,6 +1498,18 @@ export default function App() {
           <div style={S.brandMark}>H</div>
           <div style={S.brandDate}>{(() => { const d = new Date(); return `${d.getMonth() + 1}月${d.getDate()}日（${WD_JP[d.getDay()]}）`; })()}</div>
         </div>
+        {(() => {
+          const act = projects.filter((p) => p.id !== INBOX_ID && p.status !== "完了");
+          const nReply = act.filter((p) => replyNeeded(p)).length;
+          const nSug = act.filter((p) => { const s = statusSuggestion(p); return s && s.mark === "warn"; }).length;
+          if (!nReply && !nSug) return null;
+          return (
+            <div style={wide ? S.alertWrapPc : S.alertWrapSp} title="要返信／ステータス変更の提案がある案件数">
+              {nReply > 0 && <span style={{ ...S.alertChip, color: "#6B8AFF" }}><Reply size={12} strokeWidth={2.6} />{nReply}</span>}
+              {nSug > 0 && <span style={{ ...S.alertChip, color: "#D9A23B" }}><AlertTriangle size={12} strokeWidth={2.6} />{nSug}</span>}
+            </div>
+          );
+        })()}
         {wide && (
           <button style={S.headerRefresh} title="その場で更新（同期＋Chatwork＋Gmail）" onClick={runRefresh} disabled={ptrBusy}>
             <Repeat size={15} strokeWidth={2.4} style={ptrBusy ? { animation: "helmspin 0.9s linear infinite" } : {}} />
@@ -5629,6 +5641,10 @@ const S = {
   brandDate: { fontFamily: F.disp, fontWeight: 700, fontSize: 15, color: C.ink, letterSpacing: 0.2, whiteSpace: "nowrap" },
   brandLabel: { fontFamily: F.disp, fontWeight: 800, fontSize: 15, color: C.ink, letterSpacing: 0.3, whiteSpace: "nowrap" },
   headerKpi: { position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)", display: "inline-flex", alignItems: "center", gap: 8, background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 10, padding: "5px 14px", whiteSpace: "nowrap" },
+  // 未対応バッジ（要返信＝青・ステータス提案＝アンバー）
+  alertWrapPc: { display: "inline-flex", alignItems: "center", gap: 7, marginRight: 2 },
+  alertWrapSp: { display: "inline-flex", alignItems: "center", gap: 5 },
+  alertChip: { display: "inline-flex", alignItems: "center", gap: 3.5, fontFamily: F.disp, fontSize: 13.5, fontWeight: 800, background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 20, padding: "3px 9px", whiteSpace: "nowrap" },
   headerRefresh: { display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, background: "transparent", color: C.ink2, borderRadius: 9, padding: "6px 12px", fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer" },
   headerKpiLabel: { fontSize: 12, color: C.ink2, fontWeight: 600 },
   headerKpiValue: { fontFamily: F.disp, fontWeight: 800, fontSize: 15, color: C.ink, letterSpacing: 0.3, fontVariantNumeric: "tabular-nums" },
