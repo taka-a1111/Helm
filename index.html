@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-25e"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-25f"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -6139,7 +6139,7 @@ const S = {
   calModalClear: { border: "none", background: "transparent", color: C.ink3, fontSize: 14.5, fontWeight: 600, padding: "8px 6px" },
   cardTaskList: { display: "flex", flexDirection: "column", gap: 9, marginTop: 10, paddingLeft: 30 },
   cardTaskRow: { display: "flex", alignItems: "flex-start", gap: 12, cursor: "pointer" },
-  cardTaskRowWip: { borderLeft: `3px solid ${C.accent}`, marginLeft: -9, paddingLeft: 6, background: "rgba(107,138,255,0.06)", borderRadius: 6 },
+  cardTaskRowWip: { background: "rgba(107,138,255,0.10)", borderRadius: 6 },
   cardTaskCheck: { display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", padding: 2, flexShrink: 0, cursor: "pointer" },
   cardTaskTitle: { fontSize: 19, color: C.ink, lineHeight: 1.35, wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" },
   cardTaskMore: { fontSize: 14, color: C.ink3, fontWeight: 600, paddingLeft: 17 },
@@ -6330,7 +6330,7 @@ const S = {
 
   tcard: { position: "relative", textAlign: "left", display: "flex", cursor: "pointer", alignItems: "flex-start", gap: 10, background: "transparent", border: "none", borderRadius: 0, padding: "8px 0", cursor: "pointer", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" },
   tcardDone: { opacity: 0.62, cursor: "default" },
-  tcardWip: { borderLeft: `3px solid ${C.accent}`, background: "rgba(107,138,255,0.07)" },
+  tcardWip: { background: "rgba(107,138,255,0.10)", borderRadius: 8 },
   tcardTitle: { fontSize: 19, fontFamily: F.disp, fontWeight: 700, lineHeight: 1.35, letterSpacing: 0.15, color: C.ink, wordBreak: "break-word" },
   tcardMeta: { display: "flex", alignItems: "center", gap: 7, marginTop: 6, flexWrap: "wrap" },
   tcardProject: { display: "flex", alignItems: "center", gap: 5, border: "none", background: "transparent", padding: 0, fontSize: 15.5, color: C.ink2, fontWeight: 600, minWidth: 0 },
