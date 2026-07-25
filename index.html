@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-25c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-25d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -332,7 +332,13 @@ function cleanMsgs(msgs) {
   const cleaned = msgs.map((m) => ({
     ...m,
     body: (m.body || "").split("\n").filter((l) => !/^Loading_\d+x\d+$/.test(l.trim())).join("\n").trim(),
-  })).filter((m) => m.body).map((m) => (
+  })).filter((m) => m.body)
+  .filter((m) => {
+    // 誤って取り込まれたメルマガ・配信系メール（PIVOT等）は除去
+    if (m.src !== "gmail") return true;
+    const hay = `${m.name || ""} ${m.body || ""}`;
+    return !/karte\.io|プレイリスト|今週の\d+本|編集部厳選|配信停止|メールマガジン|newsletter/i.test(hay);
+  }).map((m) => (
     // 自分の送信メールが相手として取り込まれることがあるので補正（本人が名乗っている本文で判定）
     m.who === "client" && (isMeName(m.name) || /高崎です|インフォサクセスの高崎/.test((m.body || "").slice(0, 500)))
       ? { ...m, who: "me" } : m
@@ -771,6 +777,10 @@ export default function App() {
               : { who: "client", name: mail.client || "ランサーズ", at: mail.at || "",
                   body: ex, partial: true, src: "lancersmail", curl: lurl };
           } else {
+            // メルマガ・配信系（PIVOT等のKARTE配信、no-reply、配信停止リンク付き）は案件ログに入れない
+            const hay = `${mail.from || ""} ${mail.fromName || ""} ${mail.subject || ""} ${(mail.body || "").slice(0, 1500)}`;
+            const isBulk = /no-?reply|noreply|newsletter|magazine|mailmag|info@|news@|karte\.io|mailchimp|sendgrid|benchmark|配信停止|購読|メールマガジン|プレイリスト|今週の\d+本|編集部厳選/i.test(hay);
+            if (isBulk) continue;
             entry = { who: mail.dir === "out" ? "me" : "client", name: mail.fromName || mail.from || "", at: mail.at || "",
               body: (mail.subject ? `【${mail.subject}】\n` : "") + (mail.body || ""), partial: false, src: "gmail" };
           }
