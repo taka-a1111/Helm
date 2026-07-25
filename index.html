@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-25i"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-25j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -2046,6 +2046,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
       <DateQuickMenu menu={dateMenu}
         onPickOffset={(o) => { onUpdateTask(dateMenu.pid, dateMenu.tid, { start: dStr(o) }); setDateMenu(null); }}
         onPickDate={(v) => { onUpdateTask(dateMenu.pid, dateMenu.tid, { start: v }); setDateMenu(null); }}
+        onClear={() => { onUpdateTask(dateMenu.pid, dateMenu.tid, { start: "" }); setDateMenu(null); }}
         onClose={() => setDateMenu(null)} />
     </div>
   );
@@ -2894,6 +2895,7 @@ function TasksView({ projects, onToggle, onWip, onOpen, onOpenTask, onEditTask, 
       <DateQuickMenu menu={dateMenu}
         onPickOffset={(o) => { onChangeStart(dateMenu.pid, dateMenu.tid, dStr(o)); setDateMenu(null); }}
         onPickDate={(v) => { onChangeStart(dateMenu.pid, dateMenu.tid, v); setDateMenu(null); }}
+        onClear={() => { onChangeStart(dateMenu.pid, dateMenu.tid, ""); setDateMenu(null); }}
         onClose={() => setDateMenu(null)} />
       {!singleLane && (
       <div style={{ ...S.taskTabs, ...(forceNarrow ? S.triStickyTabs : {}) }}>
@@ -3100,7 +3102,7 @@ function MiniMonthCal({ value, onPick }) {
 }
 
 // 日付の右クリックメニュー本体（今日/明日/明後日 ＋ PCはカレンダーを横に常時表示）
-function DateQuickMenu({ menu, onPickOffset, onPickDate, onClose }) {
+function DateQuickMenu({ menu, onPickOffset, onPickDate, onClear, onClose }) {
   const inRef = useRef(null);
   const wide = useWideScreen();
   if (!menu) return null;
@@ -3122,6 +3124,9 @@ function DateQuickMenu({ menu, onPickOffset, onPickDate, onClose }) {
               const el = inRef.current;
               if (el) { try { el.showPicker ? el.showPicker() : el.click(); } catch {} }
             }}>カレンダー指定…</button>
+          )}
+          {menu.cur && onClear && (
+            <button style={{ ...S.dqItem, borderTop: `1px solid ${C.line}`, color: "#FF8A8A" }} onClick={onClear}>日付を削除</button>
           )}
           <input ref={inRef} type="date" defaultValue={menu.cur || dStr(0)}
             style={{ position: "absolute", left: 0, bottom: 0, width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
