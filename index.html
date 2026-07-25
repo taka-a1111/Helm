@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-25d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-25e"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -367,7 +367,7 @@ function normalizeProjects(arr) {
       msgs: cleanMsgs(Array.isArray(p.msgs) ? p.msgs : []),
       tsq: p.tsq ? (p.tsq.items ? p.tsq : { srcId: p.tsq.srcId || "", items: p.tsq.title ? [{ title: p.tsq.title, note: p.tsq.note || "", due: p.tsq.due || "", urgent: !!p.tsq.urgent }] : [] }) : null, tsqSeen: p.tsqSeen ?? "", rsug: p.rsug ?? null, rneed: (p.rneed && p.rneed.need === false && p.rneed.v !== 2) ? null : (p.rneed ?? null), statusAt: p.statusAt ?? null,
       received: p.received ?? "", replyDraft: p.replyDraft ?? "", repliedAt: p.repliedAt ?? null, replyUrl: p.replyUrl ?? "", replyHistory: p.replyHistory ?? [], summary: p.summary ?? "",
-      tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "", note: t.note ?? "", repeat: t.repeat ?? null, doneAt: t.doneAt ?? (t.done ? Date.now() : null) })),
+      tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "", note: t.note ?? "", repeat: t.repeat ?? null, wip: t.wip ?? false, doneAt: t.doneAt ?? (t.done ? Date.now() : null) })),
     };
     // ★リンク一元化：案件links＋返信先URL＋全タスクlinks を案件へ寄せ、重複URLは1本化。返信先は kind:reply。タスクからlinksは除去。
     const merged = []; const seen = new Set();
@@ -1310,6 +1310,11 @@ export default function App() {
     }
     setUndoDel(null);
   };
+  const setTaskWip = (pid, tid) => {
+    persist((projectsRef.current || []).map((p) => p.id !== pid ? p : {
+      ...p, tasks: (p.tasks || []).map((t) => t.id !== tid ? t : { ...t, wip: !t.wip, done: false }),
+    }));
+  };
   const toggleTask = (pid, tid) => {
     const next = projects.map((p) => p.id !== pid ? p : {
       ...p, tasks: p.tasks.map((t) => {
@@ -1320,7 +1325,7 @@ export default function App() {
           if (nx) return { ...t, done: false, start: nx };
         }
         const nowDone = !t.done;
-        return { ...t, done: nowDone, doneAt: nowDone ? Date.now() : null };
+        return { ...t, done: nowDone, doneAt: nowDone ? Date.now() : null, wip: nowDone ? false : t.wip };
       }),
     });
     persist(next);
@@ -1578,11 +1583,11 @@ export default function App() {
                 <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />
               </div>
               {focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
-              {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} heldRank={held.projRank} />}
-              {focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
+              {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} heldRank={held.projRank} />}
+              {focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             </div>
             <div style={S.triCol}>
-              <TasksView forceNarrow projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onNoReply={markNoReply} activeLane={paneLane} setActiveLane={setPaneLane} heldLane={held.taskLane} />
+              <TasksView forceNarrow projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onNoReply={markNoReply} activeLane={paneLane} setActiveLane={setPaneLane} heldLane={held.taskLane} />
             </div>
             <div style={S.triCol}>
               <CalendarView projects={projects} onOpen={openProject} forceNarrow />
@@ -1592,8 +1597,8 @@ export default function App() {
           <>
             {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
             {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
-            {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} heldRank={held.projRank} />}
-            {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
+            {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} heldRank={held.projRank} />}
+            {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
           </>
         )}
@@ -1679,7 +1684,7 @@ export default function App() {
 /* ============================================================
    フォーカス（ダッシュボード）
    ============================================================ */
-function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onToggleProject, onReorderTask, onMoveTask, sortMode, setSortMode, onSetStatus, onOpenReply, onNoReply, onAckSug, heldRank }) {
+function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onWipTask, onToggleProject, onReorderTask, onMoveTask, sortMode, setSortMode, onSetStatus, onOpenReply, onNoReply, onAckSug, heldRank }) {
   const [openCard, setOpenCard] = useState(null);
   const [openMsg, setOpenMsg] = useState(null);
   const [addingTop, setAddingTop] = useState(false); // 右上「＋追加」（今日のタスクとして追加）
@@ -2008,7 +2013,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
                         <span>{g.label}</span>
                         <span style={{ ...S.focusGroupCount, color: g.color }}>{g.items.length}</span>
                       </div>
-                      {g.items.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onUpdateTask={onUpdateTask} onEditTask={onEditTask} onToggleTask={onToggleTask} onToggleProject={onToggleProject} onDragHandle={startDrag} dragging={dragId === p.id} dragActive={dragId !== null} onTaskDrag={startTaskDrag} taskDragId={dragTaskId} onSetStatus={onSetStatus} onOpenReply={onOpenReply} onNoReply={onNoReply} onArrow={arrowMove} onAckSug={onAckSug} onDateMenu={(e, pid, t) => setDateMenu({ x: e.clientX, y: e.clientY, pid, tid: t.id, cur: taskJudgeDate(t) || "" })} />)}
+                      {g.items.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onUpdateTask={onUpdateTask} onEditTask={onEditTask} onToggleTask={onToggleTask} onWipTask={onWipTask} onToggleProject={onToggleProject} onDragHandle={startDrag} dragging={dragId === p.id} dragActive={dragId !== null} onTaskDrag={startTaskDrag} taskDragId={dragTaskId} onSetStatus={onSetStatus} onOpenReply={onOpenReply} onNoReply={onNoReply} onArrow={arrowMove} onAckSug={onAckSug} onDateMenu={(e, pid, t) => setDateMenu({ x: e.clientX, y: e.clientY, pid, tid: t.id, cur: taskJudgeDate(t) || "" })} />)}
                     </div>
                   );
                 });
@@ -2119,7 +2124,7 @@ function ProjectsView({ projects, onOpen }) {
   );
 }
 
-function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onToggleTask, onToggleProject, onDragHandle, dragging, dragActive, onTaskDrag, taskDragId, onSetStatus, onOpenReply, onNoReply, onArrow, onAckSug, onDateMenu }) {
+function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onToggleTask, onWipTask, onToggleProject, onDragHandle, dragging, dragActive, onTaskDrag, taskDragId, onSetStatus, onOpenReply, onNoReply, onArrow, onAckSug, onDateMenu }) {
   // ステータスの確信度（✓一致／?不明／⚠矛盾）と提案バー
   const sug = statusSuggestion(p);
   const [sugDismiss, setSugDismiss] = useState(false);
@@ -2248,13 +2253,14 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
         <div style={S.cardTaskList}>
           {showTasks.map((t) => (
             <div key={t.id} data-tid={t.id} data-pid={p.id}
-              style={{ ...S.cardTaskRow, touchAction: taskDragId ? "none" : "pan-y" }}
+              style={{ ...S.cardTaskRow, ...(!t.done && t.wip ? S.cardTaskRowWip : {}), touchAction: taskDragId ? "none" : "pan-y" }}
               onPointerDown={(e) => tRowDown(e, t.id)} onPointerMove={tRowMove} onPointerUp={tRowUp} onPointerCancel={tRowUp}
               onClick={(e) => { stop(e); onEditTask && onEditTask(p.id, t.id, "title"); }}>
-              <button style={S.cardTaskCheck} onPointerDown={stop}
-                onClick={(e) => { stop(e); onToggleTask && onToggleTask(p.id, t.id); }} title="タスクを完了">
-                <Circle size={18} color={C.ink3} strokeWidth={2} />
-              </button>
+              <span onPointerDown={stop}>
+                <TaskCheck done={t.done} wip={t.wip}
+                  onToggle={() => onToggleTask && onToggleTask(p.id, t.id)}
+                  onWip={() => onWipTask && onWipTask(p.id, t.id)} />
+              </span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={S.cardTaskTitle}>
                   {t.repeat && <Repeat size={13} color={C.accent} strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-2px" }} />}
@@ -2628,7 +2634,7 @@ function InboxPanel() {
   );
 }
 
-function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderProject, onSortManual, onReorderCommit, onToggleProject, onSetStatus, onOpenReply, onAckSug, onNoReply, activeLane, setActiveLane, singleLane, heldLane, forceNarrow }) {
+function TasksView({ projects, onToggle, onWip, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderProject, onSortManual, onReorderCommit, onToggleProject, onSetStatus, onOpenReply, onAckSug, onNoReply, activeLane, setActiveLane, singleLane, heldLane, forceNarrow }) {
   const wide = useWideScreen() && !forceNarrow;
   const [adding, setAdding] = useState(null); // 追加中のレーンキー（null=なし）
   const [openDone, setOpenDone] = useState(() => new Set()); // アコーディオンで完了を開いているレーン
@@ -2818,7 +2824,7 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
         {g.tasks.map((t) => (
           <TaskCard key={t.id} t={t} lane={lane}
             onDateMenu={(e, pid, tk) => setDateMenu({ x: e.clientX, y: e.clientY, pid, tid: tk.id, cur: taskJudgeDate(tk) || "" })}
-            onToggle={onToggle} onOpen={onOpen} onOpenTask={onOpenTask} onEditTask={onEditTask}
+            onToggle={onToggle} onWip={onWip} onOpen={onOpen} onOpenTask={onOpenTask} onEditTask={onEditTask}
             dragging={dragTid === t.id} dragActive={dragTid !== null || dragGid !== null}
             onStartDrag={startTaskDrag} onArrow={taskArrow}
             onChangeStart={(start) => onChangeStart(t.project.id, t.id, start)}
@@ -3120,7 +3126,44 @@ function DateQuickMenu({ menu, onPickOffset, onPickDate, onClose }) {
     </>
   );
 }
-function TaskCard({ t, lane, onToggle, onOpen, onOpenTask, onEditTask, dragging, dragActive, onStartDrag, onChangeDue, onChangeStart, onChangeKind, onArrow, onDateMenu }) {
+// タスクの3状態チェック。タップ＝完了トグル、長押し（450ms）＝実行中トグル。
+// 表示：未着手□ / 実行中□に・（アクセント枠＋中央ドット） / 完了☑
+function TaskCheck({ done, wip, size = 18, onToggle, onWip }) {
+  const timer = useRef(null);
+  const longFired = useRef(false);
+  const down = (e) => {
+    e.stopPropagation();
+    longFired.current = false;
+    timer.current = setTimeout(() => {
+      longFired.current = true;
+      if (navigator.vibrate) { try { navigator.vibrate(15); } catch {} }
+      onWip && onWip();
+    }, 450);
+  };
+  const up = (e) => { e.stopPropagation(); if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
+  const cancel = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
+  const click = (e) => {
+    e.stopPropagation();
+    if (longFired.current) { longFired.current = false; return; } // 長押しした時はタップ完了を発火させない
+    onToggle && onToggle();
+  };
+  const green = "#51CF66", grey = "#3A434F", accent = C.accent;
+  const r = 4;
+  return (
+    <button style={S.checkBtn} onClick={click}
+      onPointerDown={down} onPointerUp={up} onPointerLeave={cancel} onPointerCancel={cancel}
+      onContextMenu={(e) => e.preventDefault()}
+      title={done ? "完了（タップで戻す・長押しで実行中）" : wip ? "実行中（タップで完了・長押しで解除）" : "タップで完了・長押しで実行中"}>
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="3" width="18" height="18" rx={r} stroke={done ? green : wip ? accent : grey} strokeWidth="2.2" fill={done ? green : "none"} />
+        {done && <path d="M7.5 12.2l3 3 6-6.4" stroke="#0F1318" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />}
+        {!done && wip && <circle cx="12" cy="12" r="3.4" fill={accent} />}
+      </svg>
+    </button>
+  );
+}
+
+function TaskCard({ t, lane, onToggle, onWip, onOpen, onOpenTask, onEditTask, dragging, dragActive, onStartDrag, onChangeDue, onChangeStart, onChangeKind, onArrow, onDateMenu }) {
   // 長押し（400ms）で並べ替えドラッグ開始
   const lpTimer = useRef(null);
   const downInfo = useRef(null);
@@ -3139,7 +3182,7 @@ function TaskCard({ t, lane, onToggle, onOpen, onOpenTask, onEditTask, dragging,
   return (
     <div data-tid={t.id} data-pid={t.project.id}
       onContextMenu={(e) => e.preventDefault()}
-      style={{ ...S.tcard, ...(t.done ? S.tcardDone : {}), touchAction: dragActive ? "none" : "pan-y" }}
+      style={{ ...S.tcard, ...(t.done ? S.tcardDone : {}), ...(!t.done && t.wip ? S.tcardWip : {}), touchAction: dragActive ? "none" : "pan-y" }}
       onPointerDown={tdown} onPointerMove={tmove} onPointerUp={tup} onPointerCancel={tup}
       onClick={(e) => {
         if (e.target.closest && e.target.closest("button, input, a, label")) return;
@@ -3147,10 +3190,9 @@ function TaskCard({ t, lane, onToggle, onOpen, onOpenTask, onEditTask, dragging,
         if (t.kind === "reply") { onOpenTask ? onOpenTask(t.project, t.id) : onOpen(t.project); return; }
         onEditTask ? onEditTask(t.project.id, t.id) : (onOpenTask ? onOpenTask(t.project, t.id) : onOpen(t.project));
       }}>
-      <button style={S.checkBtn} onClick={(e) => { e.stopPropagation(); onToggle(t.project.id, t.id); }}>
-        {t.done ? <CheckCircle2 size={18} color="#51CF66" strokeWidth={2.2} />
-                : <Circle size={18} color="#3A434F" strokeWidth={2.2} />}
-      </button>
+      <TaskCheck done={t.done} wip={t.wip}
+        onToggle={() => onToggle(t.project.id, t.id)}
+        onWip={() => onWip && onWip(t.project.id, t.id)} />
       <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
         <div style={{ ...S.tcardTitle, ...(t.done ? S.trowDone : {}) }}>
           {t.kind === "reply" && <Reply size={13} color="#6B8AFF" strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-1px" }} />}
@@ -6097,6 +6139,7 @@ const S = {
   calModalClear: { border: "none", background: "transparent", color: C.ink3, fontSize: 14.5, fontWeight: 600, padding: "8px 6px" },
   cardTaskList: { display: "flex", flexDirection: "column", gap: 9, marginTop: 10, paddingLeft: 30 },
   cardTaskRow: { display: "flex", alignItems: "flex-start", gap: 12, cursor: "pointer" },
+  cardTaskRowWip: { borderLeft: `3px solid ${C.accent}`, marginLeft: -9, paddingLeft: 6, background: "rgba(107,138,255,0.06)", borderRadius: 6 },
   cardTaskCheck: { display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", padding: 2, flexShrink: 0, cursor: "pointer" },
   cardTaskTitle: { fontSize: 19, color: C.ink, lineHeight: 1.35, wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" },
   cardTaskMore: { fontSize: 14, color: C.ink3, fontWeight: 600, paddingLeft: 17 },
@@ -6287,6 +6330,7 @@ const S = {
 
   tcard: { position: "relative", textAlign: "left", display: "flex", cursor: "pointer", alignItems: "flex-start", gap: 10, background: "transparent", border: "none", borderRadius: 0, padding: "8px 0", cursor: "pointer", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" },
   tcardDone: { opacity: 0.62, cursor: "default" },
+  tcardWip: { borderLeft: `3px solid ${C.accent}`, background: "rgba(107,138,255,0.07)" },
   tcardTitle: { fontSize: 19, fontFamily: F.disp, fontWeight: 700, lineHeight: 1.35, letterSpacing: 0.15, color: C.ink, wordBreak: "break-word" },
   tcardMeta: { display: "flex", alignItems: "center", gap: 7, marginTop: 6, flexWrap: "wrap" },
   tcardProject: { display: "flex", alignItems: "center", gap: 5, border: "none", background: "transparent", padding: 0, fontSize: 15.5, color: C.ink2, fontWeight: 600, minWidth: 0 },
