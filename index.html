@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-25b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-25c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -3036,26 +3036,76 @@ function TaskMetaChips({ t, onMenu }) {
   );
 }
 
-// 日付の右クリックメニュー本体（今日/明日/明後日/カレンダー指定）
+// 日付選択用のミニ月グリッド（PCの右クリックメニュー横に表示）
+function MiniMonthCal({ value, onPick }) {
+  const init = (() => {
+    const v = value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value.split("-").map(Number) : null;
+    const d = v ? new Date(v[0], v[1] - 1, 1) : new Date(TODAY);
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  })();
+  const [cur, setCur] = useState(init);
+  const y = cur.getFullYear(), m = cur.getMonth();
+  const first = new Date(y, m, 1).getDay();
+  const days = new Date(y, m + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < first; i++) cells.push(null);
+  for (let d = 1; d <= days; d++) cells.push(d);
+  const todayStr = dStr(0);
+  return (
+    <div style={S.dqCal} onClick={(e) => e.stopPropagation()}>
+      <div style={S.dqCalHead}>
+        <button style={S.dqCalNav} onClick={() => setCur(new Date(y, m - 1, 1))}>‹</button>
+        <span style={S.dqCalTitle}>{y}年 {m + 1}月</span>
+        <button style={S.dqCalNav} onClick={() => setCur(new Date(y, m + 1, 1))}>›</button>
+      </div>
+      <div style={S.dqCalWD}>{["日", "月", "火", "水", "木", "金", "土"].map((w, i) => (
+        <span key={w} style={{ ...S.dqCalWDCell, color: i === 0 ? "#FF8A8A" : i === 6 ? "#8AA6FF" : C.ink3 }}>{w}</span>
+      ))}</div>
+      <div style={S.dqCalGrid}>
+        {cells.map((d, i) => {
+          if (d == null) return <span key={i} />;
+          const ds = `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+          const isToday = ds === todayStr;
+          const isSel = ds === value;
+          return (
+            <button key={i} style={{ ...S.dqCalDay, ...(isToday ? S.dqCalToday : {}), ...(isSel ? S.dqCalSel : {}) }}
+              onClick={() => onPick(ds)}>{d}</button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// 日付の右クリックメニュー本体（今日/明日/明後日 ＋ PCはカレンダーを横に常時表示）
 function DateQuickMenu({ menu, onPickOffset, onPickDate, onClose }) {
   const inRef = useRef(null);
+  const wide = useWideScreen();
   if (!menu) return null;
-  const left = Math.min(menu.x, (window.innerWidth || 1000) - 180);
-  const top = Math.min(menu.y, (window.innerHeight || 800) - 200);
+  const menuW = 168, calW = 244, gap = 8;
+  const totalW = wide ? menuW + gap + calW : 180;
+  const vw = window.innerWidth || 1000, vh = window.innerHeight || 800;
+  const left = Math.max(8, Math.min(menu.x, vw - totalW - 8));
+  const top = Math.min(menu.y, vh - (wide ? 300 : 200));
   return (
     <>
       <div style={S.dqOverlay} onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
-      <div style={{ ...S.dqMenu, left, top }}>
-        {[["今日", 0], ["明日", 1], ["明後日", 2]].map(([l, o]) => (
-          <button key={l} style={S.dqItem} onClick={() => onPickOffset(o)}>{l}<span style={S.dqDate}>{dStr(o).slice(5).replace("-", "/")}</span></button>
-        ))}
-        <button style={{ ...S.dqItem, borderTop: `1px solid ${C.line}` }} onClick={() => {
-          const el = inRef.current;
-          if (el) { try { el.showPicker ? el.showPicker() : el.click(); } catch {} }
-        }}>カレンダー指定…</button>
-        <input ref={inRef} type="date" defaultValue={menu.cur || dStr(0)}
-          style={{ position: "absolute", left: 0, bottom: 0, width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
-          onChange={(e) => { if (e.target.value) onPickDate(e.target.value); }} />
+      <div style={{ position: "fixed", zIndex: 401, left, top, display: "flex", alignItems: "flex-start", gap }}>
+        <div style={{ ...S.dqMenu, position: "static" }}>
+          {[["今日", 0], ["明日", 1], ["明後日", 2]].map(([l, o]) => (
+            <button key={l} style={S.dqItem} onClick={() => onPickOffset(o)}>{l}<span style={S.dqDate}>{dStr(o).slice(5).replace("-", "/")}</span></button>
+          ))}
+          {!wide && (
+            <button style={{ ...S.dqItem, borderTop: `1px solid ${C.line}` }} onClick={() => {
+              const el = inRef.current;
+              if (el) { try { el.showPicker ? el.showPicker() : el.click(); } catch {} }
+            }}>カレンダー指定…</button>
+          )}
+          <input ref={inRef} type="date" defaultValue={menu.cur || dStr(0)}
+            style={{ position: "absolute", left: 0, bottom: 0, width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
+            onChange={(e) => { if (e.target.value) onPickDate(e.target.value); }} />
+        </div>
+        {wide && <MiniMonthCal value={menu.cur || dStr(0)} onPick={onPickDate} />}
       </div>
     </>
   );
@@ -5834,6 +5884,16 @@ const S = {
   dqMenu: { position: "fixed", zIndex: 401, minWidth: 168, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 11, padding: 5, boxShadow: "0 12px 32px rgba(0,0,0,0.5)" },
   dqItem: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, width: "100%", border: "none", background: "transparent", color: C.ink, fontSize: 14, fontWeight: 600, padding: "9px 11px", borderRadius: 8, cursor: "pointer", textAlign: "left" },
   dqDate: { color: C.ink3, fontSize: 12.5, fontWeight: 600 },
+  dqCal: { width: 244, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 11, padding: 10, boxShadow: "0 12px 32px rgba(0,0,0,0.5)" },
+  dqCalHead: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
+  dqCalTitle: { fontSize: 13.5, fontWeight: 700, color: C.ink },
+  dqCalNav: { border: "none", background: "transparent", color: C.ink2, fontSize: 20, lineHeight: 1, fontWeight: 700, padding: "2px 8px", cursor: "pointer", borderRadius: 7 },
+  dqCalWD: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", marginBottom: 2 },
+  dqCalWDCell: { textAlign: "center", fontSize: 11, fontWeight: 700, padding: "2px 0" },
+  dqCalGrid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 1 },
+  dqCalDay: { border: "none", background: "transparent", color: C.ink, fontSize: 13, fontWeight: 600, height: 30, borderRadius: 7, cursor: "pointer" },
+  dqCalToday: { border: `1px solid ${C.accent}` },
+  dqCalSel: { background: C.accent, color: "#fff", fontWeight: 800 },
   claudeRegInput: { flex: 1, minWidth: 0, background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 9, color: C.ink, padding: "9px 11px", fontSize: 14 },
   claudeRegBtn: { flexShrink: 0, border: "none", background: "rgba(107,138,255,0.16)", color: C.accent, borderRadius: 9, padding: "9px 12px", fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap", cursor: "pointer" },
   triStickyTabs: { position: "sticky", top: 0, zIndex: 15, background: C.bg, paddingTop: 2, paddingBottom: 4, marginBottom: 10 },
