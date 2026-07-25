@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-25h"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-25i"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -5418,15 +5418,27 @@ function atToTs(at) {
 }
 function replyNeeded(p) {
   const msgs = p.msgs || [];
-  const last = msgs[msgs.length - 1];
-  if (!last || last.who !== "client") return false;
-  if (isClosingMsg(last.body)) return false;
+  if (!msgs.length) return false;
+  // 自分の最後の返信より後に来た相手メッセージ（＝未返信の束）
+  let lastMe = -1;
+  for (let i = msgs.length - 1; i >= 0; i--) { if (msgs[i].who === "me") { lastMe = i; break; } }
+  const pending = msgs.slice(lastMe + 1).filter((m) => m.who === "client");
+  if (!pending.length) return false;
+  // 束の中に「お礼・承知だけ」でない実質的な用件が1件でもあれば要返信
+  const substantive = pending.some((m) => !isClosingMsg(m.body));
+  if (!substantive) return false;
+  // 手動「返信不要」：最新メッセージに対して不要指定されていれば出さない
+  const last = pending[pending.length - 1];
   if (p.rneed && p.rneed.srcId === last.id && p.rneed.need === false) return false;
   // クラウドワークス／ランサーズは自分の返信を取得できないため、「リンクを開いた時刻」より前の
   // 相手メッセージは返信済みとみなす。Chatwork・メールは履歴が正なのでこのガードは効かせない。
+  // 束の中に repliedAt より後の相手メッセージが1件でもあれば、まだ未返信として扱う。
   const src = last.src || "";
   const cwlan = src === "cwmail" || src === "lancersnotice" || src === "lancersmail";
-  if (cwlan && p.repliedAt && last.at && atToTs(last.at) <= p.repliedAt) return false;
+  if (cwlan && p.repliedAt) {
+    const anyAfter = pending.some((m) => m.at && atToTs(m.at) > p.repliedAt);
+    if (!anyAfter) return false;
+  }
   return true;
 }
 
