@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-25g"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-25h"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -338,11 +338,17 @@ function cleanMsgs(msgs) {
     if (m.src !== "gmail") return true;
     const hay = `${m.name || ""} ${m.body || ""}`;
     return !/karte\.io|プレイリスト|今週の\d+本|編集部厳選|配信停止|メールマガジン|newsletter/i.test(hay);
-  }).map((m) => (
-    // 自分の送信メールが相手として取り込まれることがあるので補正（本人が名乗っている本文で判定）
-    m.who === "client" && (isMeName(m.name) || /高崎です|インフォサクセスの高崎/.test((m.body || "").slice(0, 500)))
-      ? { ...m, who: "me" } : m
-  ));
+  }).map((m) => {
+    // 自分の送信メールが相手として取り込まれることがあるので補正。
+    // ただし相手が高崎の署名を引用して返信すると誤反転するため、本文先頭の非引用行だけで判定する。
+    if (m.who !== "client") return m;
+    if (isMeName(m.name)) return { ...m, who: "me" };
+    const head = String(m.body || "").split("\n")
+      .filter((l) => !/^\s*[>＞|｜]/.test(l))   // 引用行を除外
+      .slice(0, 4).join(" ").slice(0, 200);      // 本文の冒頭だけ
+    if (/インフォサクセスの高崎|高崎です/.test(head)) return { ...m, who: "me" };
+    return m;
+  });
   const out = [];
   const nrm = (s) => (s || "").replace(/\s+/g, " ").trim();
   for (const m of cleaned) {
