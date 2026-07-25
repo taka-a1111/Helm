@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-25f"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-25g"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -3242,14 +3242,25 @@ function AddTaskInline({ projects, onAdd, onCancel }) {
    詳細・編集ドロワー
    ============================================================ */
 // 未返信の相手メッセージからClaude用プロンプトを作る。連投なら「まとめて1通で返す」指示にする
-function buildReplyPrompt(items) {
+function buildReplyPrompt(items, context) {
   const list = (items || []).filter((m) => (m.body || "").trim());
   if (!list.length) return "";
+  const who = (m) => (m.who === "me" ? "自分" : (m.name || "相手"));
+  const line = (m) => `[${m.at ? fmtLogAt(m.at) + " " : ""}${who(m)}]\n${(m.body || "").trim()}`;
+  // 文脈（直近のやり取り。自分の返信も含む）
+  const ctx = (context || []).filter((m) => (m.body || "").trim());
+  const ctxBlock = ctx.length
+    ? `これまでのやり取り（直近${ctx.length}件・文脈把握用）：\n\n${ctx.map(line).join("\n\n")}\n\n----\n\n`
+    : "";
   if (list.length === 1) {
-    return "次のメッセージを頂きました。それに対する返信文を作ってください。簡潔に書いてください。\n\n" + list[0].body.trim();
+    const head = ctxBlock ? "上記の流れをふまえ、次の相手メッセージに対する返信文を作ってください。" : "次のメッセージを頂きました。それに対する返信文を作ってください。";
+    return `${ctxBlock}${head}簡潔に書いてください。\n\n${list[0].body.trim()}`;
   }
   const body = list.map((m, i) => `【${i + 1}件目${m.at ? " " + fmtLogAt(m.at) : ""}】\n${m.body.trim()}`).join("\n\n");
-  return `次の${list.length}件のメッセージを頂きました。${list.length}件すべてに対する返信を、1つのメッセージにまとめて作ってください。簡潔に書いてください。\n\n${body}`;
+  const head = ctxBlock
+    ? `上記の流れをふまえ、次の${list.length}件の相手メッセージすべてに対する返信を、1つのメッセージにまとめて作ってください。`
+    : `次の${list.length}件のメッセージを頂きました。${list.length}件すべてに対する返信を、1つのメッセージにまとめて作ってください。`;
+  return `${ctxBlock}${head}簡潔に書いてください。\n\n${body}`;
 }
 
 // ==================== 返信アシストシート ====================
@@ -3315,7 +3326,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
   const text = project.rsug ? project.rsug.text : "";
   const genSeq = useRef(0);
   const [showChoice, setShowChoice] = useState(false);
-  const [showCtx, setShowCtx] = useState(false);
+  const [showCtx, setShowCtx] = useState(true); // 既定で直近のやり取り（自分の返信含む）を表示
   const [prepared, setPrepared] = useState(false); // 返信文をコピーしたか（見に行くだけでは記録しない）
   const [showDiag, setShowDiag] = useState(false);   // ログ内訳の確認（返信済みなのに出る時の切り分け用）
   const [excluded, setExcluded] = useState({}); // 返信対象から外したメッセージ（別案件が混ざっている時用）
@@ -3343,7 +3354,10 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
     for (let i = allM.length - 1; i >= 0; i--) { if (allM[i].who === "me") { lm = i; break; } }
     const pendingMsgs = allM.slice(lm + 1)
       .filter((m) => m.who === "client" && m.src !== "cwmail" && m.src !== "lancersnotice" && (m.body || "").trim() && !excluded[m.id]);
-    const prompt = buildReplyPrompt(pendingMsgs);
+    // 文脈：未返信ブロックの手前から、直近10トーク（自分＋相手）を渡す（本文のあるもの）
+    const before = allM.slice(0, lm + 1).filter((m) => (m.body || "").trim() && m.src !== "cwmail" && m.src !== "lancersnotice");
+    const ctxMsgs = before.slice(-10);
+    const prompt = buildReplyPrompt(pendingMsgs, ctxMsgs);
     if (!prompt) { setConsultNote("相手のメッセージ本文がログにありません。先に本文を取り込んでください"); return; }
     const link = claudeProjectLinkOf(project) || ((project.links || []).find((l) => /claude\.ai\//.test(l.url || "")));
     // 未登録のまま新規チャットを開くと「開いたが送っていない」状態になりやすいので、登録を先に促す
@@ -3407,7 +3421,8 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
   const targetId = recent.length ? recent[recent.length - 1].id : null;
   const ctxTo0 = recentAll.length ? allMsgs.findIndex((m) => m.id === recentAll[0].id) : -1;
   const ctxTo = ctxTo0 < 0 ? allMsgs.length : ctxTo0;
-  const context = allMsgs.slice(Math.max(0, ctxTo - 3), ctxTo);
+  // 文脈：未返信ブロックの手前から直近10トーク（自分の返信も含めて流れを読めるように）
+  const context = allMsgs.slice(Math.max(0, ctxTo - 10), ctxTo);
   const targetMsg = recent.length ? recent[recent.length - 1] : null;
   const rlink = replyLinkOf(project);
   const rlinkLabel = (() => { if (!rlink) return ""; try { const li = linkInfo(rlink.url); return (li && li.label) || "リンクを開く"; } catch { return "リンクを開く"; } })();
