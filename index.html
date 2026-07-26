@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-25j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-25k"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1538,7 +1538,7 @@ export default function App() {
         {(() => {
           const act = projects.filter((p) => p.id !== INBOX_ID && p.status !== "完了");
           const nReply = act.filter((p) => replyNeeded(p)).length;
-          const nSug = act.filter((p) => { const s = statusSuggestion(p); return s && s.mark === "warn"; }).length;
+          const nSug = act.filter((p) => { const s = statusSuggestion(p); return s && (s.mark === "warn" || s.mark === "todo"); }).length;
           if (!nReply && !nSug) return null;
           return (
             <div style={wide ? S.alertWrapPc : S.alertWrapSp} title="要返信／ステータス変更の提案がある案件数">
@@ -2205,6 +2205,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
             <StatusIcon status={p.status} />
             {sug && sug.mark === "ok" && <Check size={13} color="#51CF66" strokeWidth={3} style={{ flexShrink: 0 }} />}
             {sug && sug.mark === "warn" && <AlertTriangle size={13} color="#D9A23B" strokeWidth={2.6} style={{ flexShrink: 0 }} />}
+            {sug && sug.mark === "todo" && <Hourglass size={13} color={C.accent} strokeWidth={2.6} style={{ flexShrink: 0 }} title="こちらの作業が残っています" />}
             {sug && sug.mark === "unknown" && <span style={S.trustUnknown} title="ログ未登録または古いため判定できません">?</span>}
             {liveTsqItems(p).length > 0 && <ListPlus size={14} color="#D9A23B" strokeWidth={2.6} style={{ flexShrink: 0 }} title="タスク候補あり（開いて確認）" />}
           </span>
@@ -2239,6 +2240,13 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
         )}
       </div>
 
+      {!dragActive && sug && sug.mark === "todo" && !sugDismiss && (
+        <div style={{ ...S.suggestBar, background: "rgba(107,138,255,0.10)" }} onPointerDown={stop} onClick={stop}>
+          <Hourglass size={13} color={C.accent} strokeWidth={2.4} style={{ flexShrink: 0 }} />
+          <span style={{ ...S.suggestText, color: C.accent }}>{sug.reason}</span>
+          <button style={S.suggestX} title="対応済みにする（新着が来るまで再表示しない）" onClick={(e) => { stop(e); setSugDismiss(true); onAckSug && onAckSug(p.id); }}><X size={13} strokeWidth={2.2} /></button>
+        </div>
+      )}
       {!dragActive && sug && sug.mark === "warn" && sug.suggest && !sugDismiss && (
         <div style={S.suggestBar} onPointerDown={stop} onClick={stop}>
           <AlertTriangle size={13} color="#D9A23B" strokeWidth={2.4} style={{ flexShrink: 0 }} />
@@ -2951,9 +2959,17 @@ function GroupAssist({ p, onSetStatus, onOpenReply, onAckSug, onNoReply }) {
   const sug = statusSuggestion(p);
   const lastIsClient = replyNeeded(p);
   const warn = sug && sug.mark === "warn" && sug.suggest;
-  if (!warn && !lastIsClient) return null;
+  const todo = sug && sug.mark === "todo";
+  if (!warn && !todo && !lastIsClient) return null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, margin: "2px 0 8px" }}>
+      {todo && (
+        <div style={{ ...S.suggestBar, background: "rgba(107,138,255,0.10)" }}>
+          <Hourglass size={13} color={C.accent} strokeWidth={2.4} style={{ flexShrink: 0 }} />
+          <span style={{ ...S.suggestText, color: C.accent }}>{sug.reason}</span>
+          <button style={S.suggestX} title="対応済みにする（新着が来るまで再表示しない）" onClick={(e) => { e.stopPropagation(); onAckSug && onAckSug(p.id); }}><X size={13} strokeWidth={2.2} /></button>
+        </div>
+      )}
       {warn && (
         <div style={S.suggestBar}>
           <AlertTriangle size={13} color="#D9A23B" strokeWidth={2.4} style={{ flexShrink: 0 }} />
@@ -5368,11 +5384,16 @@ function statusSuggestion(p) {
     return { mark: "ok" };
   }
   // 自分の最後の発言が「こちらが対応する約束」なら、相手待ちではなく自分のターン
-  const commitRe = /(改めて(ご連絡|お送り|ご報告|提出|ご案内)|(完了|でき|出来|上がり)次第[^。]{0,20}(連絡|送り|報告|共有|反映|入れ込み)|(修正|作成|反映|実装|更新|調整)し(、|て)[^。]{0,25}(お送り|提出|ご連絡|ご報告|参ります|まいります)|本日中に(対応|提出|お送り|ご連絡)|(修正|対応|作成)を?進めます)/;
-  if ((p.status === "相手待ち" || p.status === "支払い待ち") && commitRe.test(last.body || "")) {
-    return { mark: "warn", suggest: "進行中", reason: "「対応します」と返信済み・こちらのターン" };
+  const commitRe = /(改めて(ご連絡|お送り|ご報告|提出|ご案内)|(完了|でき|出来|上がり|整い|揃い)(しましたら|次第|いたしましたら)[^。]{0,30}(連絡|送り|報告|共有|反映|案内|URL)|(修正|作成|反映|実装|更新|調整|掲載|追加)(を|し)(、|て|)[^。]{0,30}(お送り|提出|ご連絡|ご報告|進め|参ります|まいります|反映|対応)|本日中に(対応|提出|お送り|ご連絡)|(修正|対応|作成|掲載|反映)を?(進め|いたし)ます|追って(ご連絡|お送り|ご報告|ご案内)|確認用URL[^。]{0,15}(ご連絡|お送り|共有))/;
+  const committed = commitRe.test(last.body || "");
+  if ((p.status === "相手待ち" || p.status === "支払い待ち") && committed) {
+    return { mark: "warn", suggest: "進行中", reason: "「対応します」と約束済み・こちらのターン" };
   }
-  if (p.status === "進行中" && (p.tasks || []).filter((t) => !t.done).length === 0 && days >= 1) {
+  // 進行中で自分が「対応します」と約束＝こちらの宿題が残っている。相手待ちには回さない。
+  if (p.status === "進行中" && committed) {
+    return { mark: "todo", reason: `${dw}「対応します」と返信・こちらの作業が未完了` };
+  }
+  if (p.status === "進行中" && (p.tasks || []).filter((t) => !t.done).length === 0 && days >= 1 && !committed) {
     return { mark: "warn", suggest: "相手待ち", reason: "返信済み・未完了タスクなし" };
   }
   return { mark: "ok" };
