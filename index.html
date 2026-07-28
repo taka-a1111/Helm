@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-25k"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-07-28a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -531,15 +531,6 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  // 並び替えモード（案件一覧）。localStorageに保存し、Supabaseのprefs列があれば端末間でも同期
-  const [sortMode, setSortModeRaw] = useState("manual");
-  const sortModeRef = useRef("manual");
-  const setSortMode = (m) => {
-    setSortModeRaw(m); sortModeRef.current = m;
-    try { window.storage.set("cockpit:prefs:v1", JSON.stringify({ sortMode: m })); } catch {}
-    // prefs列が無い環境でも壊れないようにtry/catch（列はbackup-setup.sqlで追加）
-    (async () => { try { await supabase.from("helm_state").update({ prefs: { sortMode: m } }).eq("id", SUPABASE_ROW_ID); } catch {} })();
-  };
   const wide = useWideScreen(); // PCではタスク画面を横幅いっぱいに広げる
   const triPane = useWideScreen(1200); // PC：案件・タスク・カレンダーの3画面を横並び表示
   const [paneLane, setPaneLane] = useState("today"); // 3画面表示のタスク列で選択中のレーン
@@ -998,12 +989,24 @@ export default function App() {
     pullingRef.current = true;
     try {
       const remote = await sbFetch();
-      if (remote && remote.data && !dirtyRef.current) {
+      if (remote && remote.data && (force || !dirtyRef.current)) {
         const remoteReal = remote.data.some((p) => p && p.id !== INBOX_ID);
         const remoteCount = remote.data.filter((p) => p && p.id !== INBOX_ID).length;
         const localCount = projectsRef.current.filter((p) => p && p.id !== INBOX_ID).length;
         const shrunk = !force && remoteCount + 1 < localCount;
-        if (remote.rev > revRef.current && remoteReal && !shrunk) {
+        if (force && dirtyRef.current && remoteReal) {
+          // 強制取得（↻／引っ張って更新）：未送信のローカル変更(dirty)があっても取り込む。
+          // 以前は dirty のままだと force でも何も起きず、リロードでしか復帰できなかった。
+          if (remote.rev > revRef.current) {
+            const merged = mergeStates(projectsRef.current, remote.data);
+            revRef.current = remote.rev; saveMeta();
+            setProjects(merged); projectsRef.current = merged;
+            try { window.storage.set(STORE_KEY, JSON.stringify(merged)); } catch {}
+            lastPushedJsonRef.current = "";
+            setSyncState({ status: "ok", at: Date.now(), msg: "サーバの変更と統合しました" });
+          }
+          schedulePush(); // 未送信のローカル変更を送り直す
+        } else if (remote.rev > revRef.current && remoteReal && !shrunk) {
           await adopt(remote.data, remote.rev);
         } else if (remote.rev !== revRef.current && !shrunk) {
           revRef.current = remote.rev; saveMeta();
@@ -1032,6 +1035,7 @@ export default function App() {
   const runRefresh = async () => {
     if (ptrBusyRef.current) return;
     ptrBusyRef.current = true; setPtrBusy(true);
+    setHeld({ taskLane: {}, projRank: {} }); // 据え置きを解除して本来の並びに戻す
     try { await cloudPull(null, { force: true }); } catch {}
     try { if (cwPullRef.current) await cwPullRef.current(); } catch {}
     try { if (gmailPullRef.current) await gmailPullRef.current(); } catch {}
@@ -1074,16 +1078,6 @@ export default function App() {
       try { const sr = await window.storage.get(SYNC_KEY); if (sr && sr.value) { const j = JSON.parse(sr.value); if (typeof j.on === "boolean") cfg.on = j.on; } } catch {}
       setSync(cfg); syncRef.current = cfg;
       try { const mr = await window.storage.get(META_KEY); if (mr && mr.value) { const m = JSON.parse(mr.value); revRef.current = Number(m.rev) || 0; } } catch {}
-      // 並び替えモードを復元（ローカル→あればSupabase prefsが後で上書き）
-      try { const pr = await window.storage.get("cockpit:prefs:v1"); if (pr && pr.value) { const j = JSON.parse(pr.value); if (j.sortMode) { setSortModeRaw(j.sortMode); sortModeRef.current = j.sortMode; } } } catch {}
-      (async () => {
-        try {
-          const { data } = await supabase.from("helm_state").select("prefs").eq("id", SUPABASE_ROW_ID).single();
-          const m = data && data.prefs && data.prefs.sortMode;
-          if (m && m !== sortModeRef.current) { setSortModeRaw(m); sortModeRef.current = m; }
-        } catch {}
-      })();
-
       // まずローカルキャッシュで即表示（待たせない）
       let data = null;
       try { const r = await window.storage.get(STORE_KEY); if (r && r.value) data = JSON.parse(r.value); } catch {}
@@ -1132,17 +1126,10 @@ export default function App() {
     const onFocus = () => cloudPull();
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onFocus);
-    const channel = supabase.channel("helm_state_realtime")
-      .on("postgres_changes",
-        { event: "UPDATE", schema: "public", table: "helm_state", filter: `id=eq.${SUPABASE_ROW_ID}` },
-        (payload) => {
+    // 購読が切れたら自動で張り直す（PCのスリープ復帰・回線断で無反応になるのを防ぐ）
+    let channel = null, stopped = false, retry = null, tries = 0, gen = 0;
+    const onChange = (payload) => {
           try {
-            // prefs（並び替えモード等）の同期
-            const rp = payload && payload.new && payload.new.prefs;
-            if (rp && rp.sortMode && rp.sortMode !== sortModeRef.current) {
-              setSortModeRaw(rp.sortMode); sortModeRef.current = rp.sortMode;
-              try { window.storage.set("cockpit:prefs:v1", JSON.stringify({ sortMode: rp.sortMode })); } catch {}
-            }
             const remoteRev = Number(payload && payload.new && payload.new.rev) || 0;
             const remoteProjects = Array.isArray(payload && payload.new && payload.new.projects) ? payload.new.projects : null;
             if (!remoteProjects) return;
@@ -1157,12 +1144,34 @@ export default function App() {
           } catch (e) {
             setSyncState({ status: "error", at: Date.now(), msg: String(e.message || e) });
           }
-        })
-      .subscribe();
+    };
+    const connect = () => {
+      if (stopped) return;
+      const my = ++gen;
+      try { if (channel) supabase.removeChannel(channel); } catch {}
+      channel = supabase.channel("helm_state_rt_" + Date.now())
+        .on("postgres_changes",
+          { event: "UPDATE", schema: "public", table: "helm_state", filter: `id=eq.${SUPABASE_ROW_ID}` },
+          onChange)
+        .subscribe((status) => {
+          if (my !== gen || stopped) return; // 張り直し済みの古いチャンネルは無視
+          if (status === "SUBSCRIBED") { tries = 0; cloudPull(); return; }
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+            const wait = Math.min(30000, 2000 * Math.pow(2, tries++));
+            if (retry) clearTimeout(retry);
+            retry = setTimeout(connect, wait);
+          }
+        });
+    };
+    connect();
+    // フォールバック：realtimeが届かなくても60秒ごとに取りこぼしを拾う
+    const iv = setInterval(() => { if (document.visibilityState === "visible") cloudPull(); }, 60000);
     return () => {
+      stopped = true; gen++;
+      clearInterval(iv); if (retry) clearTimeout(retry);
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("focus", onFocus);
-      try { supabase.removeChannel(channel); } catch {}
+      try { if (channel) supabase.removeChannel(channel); } catch {}
     };
   }, []);
 
@@ -1589,11 +1598,11 @@ export default function App() {
                 <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />
               </div>
               {focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
-              {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} heldRank={held.projRank} />}
-              {focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
+              {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} heldRank={held.projRank} />}
+              {focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             </div>
             <div style={S.triCol}>
-              <TasksView forceNarrow projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onNoReply={markNoReply} activeLane={paneLane} setActiveLane={setPaneLane} heldLane={held.taskLane} />
+              <TasksView forceNarrow projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onNoReply={markNoReply} activeLane={paneLane} setActiveLane={setPaneLane} heldLane={held.taskLane} />
             </div>
             <div style={S.triCol}>
               <CalendarView projects={projects} onOpen={openProject} forceNarrow />
@@ -1603,8 +1612,8 @@ export default function App() {
           <>
             {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
             {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
-            {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} sortMode={sortMode} setSortMode={setSortMode} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} heldRank={held.projRank} />}
-            {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onSortManual={() => setSortMode("manual")} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
+            {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} heldRank={held.projRank} />}
+            {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
           </>
         )}
@@ -1690,7 +1699,7 @@ export default function App() {
 /* ============================================================
    フォーカス（ダッシュボード）
    ============================================================ */
-function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onWipTask, onToggleProject, onReorderTask, onMoveTask, sortMode, setSortMode, onSetStatus, onOpenReply, onNoReply, onAckSug, heldRank }) {
+function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onWipTask, onToggleProject, onReorderTask, onMoveTask, onSetStatus, onOpenReply, onNoReply, onAckSug, heldRank }) {
   const [openCard, setOpenCard] = useState(null);
   const [openMsg, setOpenMsg] = useState(null);
   const [addingTop, setAddingTop] = useState(false); // 右上「＋追加」（今日のタスクとして追加）
@@ -1745,7 +1754,6 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
   // 矢印（↑↓）で案件を1つ上下へ。表示中のカードのDOM順で隣と入れ替える
   const arrowMove = (pid, dir, ev) => {
     try {
-      setSortMode("manual");
       const card = ev.currentTarget.closest("[data-pid]");
       const scope = card ? card.parentElement : document;
       const els = Array.from(scope.querySelectorAll("[data-pid]"));
@@ -1760,7 +1768,6 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
   const startDrag = (pid, el, pointerId, sx, sy) => {
     // キャプチャは行要素ではなくbodyに取る：案件またぎ移動で行が再マウントされてもドラッグが中断しない
     try { if (pointerId != null && document.body && document.body.setPointerCapture) document.body.setPointerCapture(pointerId); } catch {}
-    setSortMode("manual"); // 並べ替えたら手動順に切替（再ソートで戻らないように）
     setDragId(pid);
     const srcP = projects.find((pp) => pp.id === pid);
     const ghost = makeRowGhost(el, sy || 0, srcP ? srcP.company : "");
@@ -2649,7 +2656,7 @@ function InboxPanel() {
   );
 }
 
-function TasksView({ projects, onToggle, onWip, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderProject, onSortManual, onReorderCommit, onToggleProject, onSetStatus, onOpenReply, onAckSug, onNoReply, activeLane, setActiveLane, singleLane, heldLane, forceNarrow }) {
+function TasksView({ projects, onToggle, onWip, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderProject, onReorderCommit, onToggleProject, onSetStatus, onOpenReply, onAckSug, onNoReply, activeLane, setActiveLane, singleLane, heldLane, forceNarrow }) {
   const wide = useWideScreen() && !forceNarrow;
   const [adding, setAdding] = useState(null); // 追加中のレーンキー（null=なし）
   const [openDone, setOpenDone] = useState(() => new Set()); // アコーディオンで完了を開いているレーン
@@ -2711,7 +2718,6 @@ function TasksView({ projects, onToggle, onWip, onOpen, onOpenTask, onEditTask, 
   // 矢印（↑↓）で案件グループを1つ上下へ（同一レーン内・DOM表示順）
   const groupArrow = (pid, dir, ev) => {
     try {
-      onSortManual && onSortManual();
       const head = ev.currentTarget.closest("[data-gpid]");
       const laneEl = head ? head.closest("[data-lane]") : null;
       const scope = laneEl || document;
@@ -2743,7 +2749,6 @@ function TasksView({ projects, onToggle, onWip, onOpen, onOpenTask, onEditTask, 
   const startGroupDrag = (pid, el, pointerId, dragLane, name, sx, sy) => {
     // キャプチャは行要素ではなくbodyに取る：案件またぎ移動で行が再マウントされてもドラッグが中断しない
     try { if (pointerId != null && document.body && document.body.setPointerCapture) document.body.setPointerCapture(pointerId); } catch {}
-    onSortManual && onSortManual(); // 手動並びへ切替（再ソートで戻らないように）
     setDragGid(pid);
     const ghost = makeRowGhost(el, sy || 0, name);
     // タスク折りたたみでリストが縮み、指の下に別グループが来て即入れ替わるのを防ぐ：
