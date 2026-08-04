@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-03b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-04a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -334,6 +334,9 @@ function cleanMsgs(msgs) {
     body: (m.body || "").split("\n").filter((l) => !/^Loading_\d+x\d+$/.test(l.trim())).join("\n").trim(),
   })).filter((m) => m.body)
   .filter((m) => {
+    // スレッドURLの無いCW/ランサーズ通知は「事務局のお知らせ」（募集終了・スカウト等）。
+    // 本物のメッセージ通知には必ず messages/boardId のURLが入るので、URL無しは案件ログから除去する
+    if ((m.src === "cwmail" || m.src === "lancersnotice") && !m.curl) return false;
     // 誤って取り込まれたメルマガ・配信系メール（PIVOT等）は除去
     if (m.src !== "gmail") return true;
     const hay = `${m.name || ""} ${m.body || ""}`;
@@ -757,6 +760,8 @@ export default function App() {
           if (mail.kind === "cw") {
             // CW通知メールは「確認URL → 本文 → 同じURL」構造。2つのURL行の間を本文として抽出する
             const cw = extractCwMail(mail.body || mail.excerpt || "");
+            // スレッドURLが無い＝事務局のお知らせ（募集終了・スカウト等）。案件ログには入れない
+            if (!cw.url) continue;
             entry = cw.body
               ? { who: "client", name: mail.client || "クラウドワークス", at: mail.at || "",
                   body: cw.body, partial: false, src: "cwmailbody", curl: cw.url }
@@ -766,6 +771,7 @@ export default function App() {
             // ランサーズの「メッセージ受信通知」は本文なし（差出人＋URLのみ）。定型文しか無ければプレースホルダにする
             const lraw = String(mail.body || mail.excerpt || "");
             const lurl = (lraw.match(/https:\/\/www\.lancers\.jp\/mypage\/message\?boardId=\d+/) || [""])[0];
+            if (!lurl) continue; // 事務局のお知らせ（メッセージ通知ではない）
             const ex = String(mail.excerpt || "").trim();
             const boiler = !ex || /ランサーズ事務局です|メッセージを受信しました|下記URLより|受信通知|内容をご確認/.test(ex);
             entry = boiler
@@ -1408,6 +1414,12 @@ export default function App() {
       return p;
     }));
   };
+  // 誤取り込みのメッセージをログから削除する
+  const delMsg = (pid, mid) =>
+    persist((projectsRef.current || []).map((p) => p.id !== pid ? p : {
+      ...p, msgs: (p.msgs || []).filter((m) => m.id !== mid), rsug: null,
+      tsq: (p.tsq && p.tsq.srcId === mid) ? null : p.tsq,
+    }));
   // 返信アシストからClaudeプロジェクト等のリンクを登録する
   const addProjectLink = (pid, url, label) =>
     persist((projectsRef.current || []).map((p) => p.id !== pid ? p : { ...p, links: [...(p.links || []), { id: uid(), label: label || "", url }] }));
@@ -1706,7 +1718,7 @@ export default function App() {
       {replyFor && (() => {
         const p = projects.find((x) => x.id === replyFor);
         if (!p) return null;
-        return <ReplySheet project={p} projects={projects} onMoveMsg={moveMsg} onClose={goBack} onSaveRsug={saveRsug} onMarkSent={markSent} onAddLink={addProjectLink} onNoReply={markNoReply} onSetWho={(mid) => setMsgWho(p.id, mid)} />;
+        return <ReplySheet project={p} projects={projects} onMoveMsg={moveMsg} onDelMsg={delMsg} onClose={goBack} onSaveRsug={saveRsug} onMarkSent={markSent} onAddLink={addProjectLink} onNoReply={markNoReply} onSetWho={(mid) => setMsgWho(p.id, mid)} />;
       })()}
 
       {/* ===== 右下フローティング＋ボタン（Googleカレンダー方式） ===== */}
@@ -3321,10 +3333,11 @@ function buildReplyPrompt(items, context) {
 // ==================== 返信アシストシート ====================
 // 直近のメッセージ＋返信候補＋コピー。候補が無ければ開いた瞬間に強制生成。
 // ログ1件の表示。相手／自分の境目をはっきりさせ、引用（>）行はまとめて折りたたむ
-function LogMsg({ m, target, tag, dim, onSetWho, innerRef, excluded, onToggleExcl, moveOpts, onMove }) {
+function LogMsg({ m, target, tag, dim, onSetWho, innerRef, excluded, onToggleExcl, moveOpts, onMove, onDelete }) {
   const me = m.who === "me";
   const [openQ, setOpenQ] = useState(false);
   const [openMv, setOpenMv] = useState(false);
+  const [delArm, setDelArm] = useState(false);
   const blocks = useMemo(() => {
     const lines = String(m.body || "").split("\n");
     const out = [];
@@ -3358,6 +3371,12 @@ function LogMsg({ m, target, tag, dim, onSetWho, innerRef, excluded, onToggleExc
             title="このメッセージを正しい案件へ移す"
             onClick={() => setOpenMv((v) => !v)}>別案件へ</button>
         )}
+        {onDelete && (
+          <button style={{ ...S.logExclBtn, ...(delArm ? { borderColor: "#FF6B6B", color: "#FF8A8A" } : {}) }}
+            title="このメッセージをログから削除"
+            onClick={() => { if (delArm) { setDelArm(false); onDelete(); } else { setDelArm(true); setTimeout(() => setDelArm(false), 3000); } }}>
+            {delArm ? "本当に削除" : "削除"}</button>
+        )}
       </div>
       {openMv && (
         <div style={S.logMoveBox}>
@@ -3387,7 +3406,7 @@ function LogMsg({ m, target, tag, dim, onSetWho, innerRef, excluded, onToggleExc
   );
 }
 
-function ReplySheet({ project, projects, onMoveMsg, onClose, onSaveRsug, onMarkSent, onAddLink, onNoReply, onSetWho }) {
+function ReplySheet({ project, projects, onMoveMsg, onDelMsg, onClose, onSaveRsug, onMarkSent, onAddLink, onNoReply, onSetWho }) {
   const [claudeReg, setClaudeReg] = useState(false);   // Claudeリンク未登録時の登録UI
   const [claudeUrl, setClaudeUrl] = useState("");
   const wide = useWideScreen();
@@ -3408,6 +3427,7 @@ function ReplySheet({ project, projects, onMoveMsg, onClose, onSaveRsug, onMarkS
     .filter((x) => x.id !== project.id && x.id !== INBOX_ID && x.status !== "完了")
     .map((x) => ({ id: x.id, company: x.company || "（無題）" })), [projects, project.id]);
   const moveMsgHere = (mid, toPid) => { onMoveMsg && onMoveMsg(project.id, mid, toPid); };
+  const delMsgHere = (mid) => { onDelMsg && onDelMsg(project.id, mid); };
   const bodyRef = useRef(null);
   const targetRef = useRef(null);
   const [consultNote, setConsultNote] = useState("");
@@ -3547,7 +3567,7 @@ function ReplySheet({ project, projects, onMoveMsg, onClose, onSaveRsug, onMarkS
           })()}
           {context.length > 0 && (showCtx
             ? <>
-                {context.map((m) => <LogMsg key={m.id} m={m} dim onSetWho={onSetWho} moveOpts={moveOpts} onMove={(to) => moveMsgHere(m.id, to)} />)}
+                {context.map((m) => <LogMsg key={m.id} m={m} dim onSetWho={onSetWho} moveOpts={moveOpts} onMove={(to) => moveMsgHere(m.id, to)} onDelete={() => delMsgHere(m.id)} />)}
                 <button style={S.rshCtxBtn} onClick={() => setShowCtx(false)}>これまでのやり取りを隠す</button>
               </>
             : <button style={S.rshCtxBtn} onClick={() => setShowCtx(true)}>これまでのやり取り {context.length}件を表示</button>
@@ -3564,7 +3584,8 @@ function ReplySheet({ project, projects, onMoveMsg, onClose, onSaveRsug, onMarkS
                 <LogMsg key={m.id} m={m} target={!ex} tag={tag} dim={ex}
                   onSetWho={onSetWho} innerRef={i === 0 ? targetRef : undefined}
                   excluded={ex} onToggleExcl={() => toggleExcl(m.id)}
-                  moveOpts={moveOpts} onMove={(to) => moveMsgHere(m.id, to)} />
+                  moveOpts={moveOpts} onMove={(to) => moveMsgHere(m.id, to)}
+                  onDelete={() => delMsgHere(m.id)} />
               );
             });
           })()}
@@ -5536,7 +5557,11 @@ function stripQuoted(body) {
     .replace(/\[qt\][\s\S]*?\[\/qt\]/g, " ")
     .replace(/\[qtmeta[^\]]*\]/g, " ")
     .replace(/\[rp\s[^\]]*\]/g, " ")
-    .split("\n").filter((l) => !/^\s*[>＞|｜]/.test(l)).join("\n").trim();
+    .split("\n").filter((l) => !/^\s*[>＞|｜]/.test(l)).join("\n")
+    // Chatworkの引用返信は「…」で相手の発言を丸ごと再掲する。長い鉤括弧ブロックは引用とみなす
+    .replace(/「[^「」]{25,}」/g, " ")
+    .replace(/「[^「」]*\n[\s\S]*?」/g, " ")
+    .trim();
 }
 function isClosingMsg(body) {
   const b = stripQuoted(body);
@@ -5647,7 +5672,8 @@ function matchMailToProject(mail, projects) {
     .replace(/ウエブ/g, "web");
   const mailFold = fold((mail.subject || "") + " " + String(mail.body || mail.excerpt || "").slice(0, 1000));
   const keys = [mail.client, mail.fromName, (mail.from || "").split("@")[0]]
-    .map((x) => norm(peelName(x))).filter((x) => x.length >= 2 && !GENERIC_NAME.test(x));
+    .map((x) => norm(peelName(x)))
+    .filter((x) => x.length >= 2 && !GENERIC_NAME.test(x) && !/crowdworks|lancers|coconala|chatwork|no-?reply|事務局/.test(x));
   const mailTh = threadKeys((mail.body || "") + " " + (mail.excerpt || ""));
   const subj = norm(mail.subject);
   let best = null, bestScore = 0;
