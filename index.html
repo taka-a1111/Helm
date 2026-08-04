@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-07-28a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-03b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1385,6 +1385,29 @@ export default function App() {
       const cm = [...(p.msgs || [])].reverse().find((m) => m.who === "client" && m.id);
       return { ...p, rsug: null, rneed: { srcId: cm ? cm.id : "", need: false, v: 2 } };
     }));
+  // 誤って別案件に取り込まれたメッセージを、正しい案件へ移す。
+  // 移動先にCW／ランサーズのスレッドURLを登録するので、以降の同スレッド通知は自動で正しい案件に入る
+  const moveMsg = (pid, mid, toPid) => {
+    const ps = projectsRef.current || [];
+    const src = ps.find((p) => p.id === pid);
+    const msg = src && (src.msgs || []).find((m) => m.id === mid);
+    if (!msg || pid === toPid) return;
+    persist(ps.map((p) => {
+      if (p.id === pid) {
+        const rest = (p.msgs || []).filter((m) => m.id !== mid);
+        return { ...p, msgs: rest, rsug: null, tsq: (p.tsq && p.tsq.srcId === mid) ? null : p.tsq };
+      }
+      if (p.id === toPid) {
+        const merged = mergeLogEntries(p.msgs || [], [msg], msg.src || "move");
+        const links = p.links || [];
+        const known = [p.replyUrl || ""].concat(links.map((l) => l.url || "")).join(" ");
+        const add = (msg.curl && known.indexOf(msg.curl) < 0)
+          ? [{ id: uid(), label: /lancers\.jp/.test(msg.curl) ? "ランサーズ" : "クラウドワークス", url: msg.curl }] : [];
+        return { ...p, msgs: merged.list, links: [...links, ...add], rsug: null };
+      }
+      return p;
+    }));
+  };
   // 返信アシストからClaudeプロジェクト等のリンクを登録する
   const addProjectLink = (pid, url, label) =>
     persist((projectsRef.current || []).map((p) => p.id !== pid ? p : { ...p, links: [...(p.links || []), { id: uid(), label: label || "", url }] }));
@@ -1683,7 +1706,7 @@ export default function App() {
       {replyFor && (() => {
         const p = projects.find((x) => x.id === replyFor);
         if (!p) return null;
-        return <ReplySheet project={p} onClose={goBack} onSaveRsug={saveRsug} onMarkSent={markSent} onAddLink={addProjectLink} onNoReply={markNoReply} onSetWho={(mid) => setMsgWho(p.id, mid)} />;
+        return <ReplySheet project={p} projects={projects} onMoveMsg={moveMsg} onClose={goBack} onSaveRsug={saveRsug} onMarkSent={markSent} onAddLink={addProjectLink} onNoReply={markNoReply} onSetWho={(mid) => setMsgWho(p.id, mid)} />;
       })()}
 
       {/* ===== 右下フローティング＋ボタン（Googleカレンダー方式） ===== */}
@@ -3298,9 +3321,10 @@ function buildReplyPrompt(items, context) {
 // ==================== 返信アシストシート ====================
 // 直近のメッセージ＋返信候補＋コピー。候補が無ければ開いた瞬間に強制生成。
 // ログ1件の表示。相手／自分の境目をはっきりさせ、引用（>）行はまとめて折りたたむ
-function LogMsg({ m, target, tag, dim, onSetWho, innerRef, excluded, onToggleExcl }) {
+function LogMsg({ m, target, tag, dim, onSetWho, innerRef, excluded, onToggleExcl, moveOpts, onMove }) {
   const me = m.who === "me";
   const [openQ, setOpenQ] = useState(false);
+  const [openMv, setOpenMv] = useState(false);
   const blocks = useMemo(() => {
     const lines = String(m.body || "").split("\n");
     const out = [];
@@ -3329,7 +3353,23 @@ function LogMsg({ m, target, tag, dim, onSetWho, innerRef, excluded, onToggleExc
             title={excluded ? "返信対象に戻す" : "この案件と無関係なので返信対象から外す"}
             onClick={onToggleExcl}>{excluded ? "対象に戻す" : "除外"}</button>
         )}
+        {onMove && (
+          <button style={{ ...S.logExclBtn, ...(openMv ? S.logExclBtnOn : {}) }}
+            title="このメッセージを正しい案件へ移す"
+            onClick={() => setOpenMv((v) => !v)}>別案件へ</button>
+        )}
       </div>
+      {openMv && (
+        <div style={S.logMoveBox}>
+          <div style={S.logMoveHint}>移動先の案件を選択（以降の同スレッド通知も自動でその案件に入ります）</div>
+          <div style={S.logMoveList}>
+            {(moveOpts || []).map((o) => (
+              <button key={o.id} style={S.logMoveItem}
+                onClick={() => { setOpenMv(false); onMove(o.id); }}>{o.company}</button>
+            ))}
+          </div>
+        </div>
+      )}
       {blocks.map((b, i) => {
         const body = b.lines.join("\n").replace(/^\n+|\n+$/g, "");
         if (b.q) {
@@ -3347,7 +3387,7 @@ function LogMsg({ m, target, tag, dim, onSetWho, innerRef, excluded, onToggleExc
   );
 }
 
-function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoReply, onSetWho }) {
+function ReplySheet({ project, projects, onMoveMsg, onClose, onSaveRsug, onMarkSent, onAddLink, onNoReply, onSetWho }) {
   const [claudeReg, setClaudeReg] = useState(false);   // Claudeリンク未登録時の登録UI
   const [claudeUrl, setClaudeUrl] = useState("");
   const wide = useWideScreen();
@@ -3363,6 +3403,11 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
   const [showDiag, setShowDiag] = useState(false);   // ログ内訳の確認（返信済みなのに出る時の切り分け用）
   const [excluded, setExcluded] = useState({}); // 返信対象から外したメッセージ（別案件が混ざっている時用）
   const toggleExcl = (id) => setExcluded((e) => ({ ...e, [id]: !e[id] }));
+  // 「別案件へ」の移動先候補（完了・受信箱・自分自身は除く）
+  const moveOpts = useMemo(() => (projects || [])
+    .filter((x) => x.id !== project.id && x.id !== INBOX_ID && x.status !== "完了")
+    .map((x) => ({ id: x.id, company: x.company || "（無題）" })), [projects, project.id]);
+  const moveMsgHere = (mid, toPid) => { onMoveMsg && onMoveMsg(project.id, mid, toPid); };
   const bodyRef = useRef(null);
   const targetRef = useRef(null);
   const [consultNote, setConsultNote] = useState("");
@@ -3502,7 +3547,7 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
           })()}
           {context.length > 0 && (showCtx
             ? <>
-                {context.map((m) => <LogMsg key={m.id} m={m} dim onSetWho={onSetWho} />)}
+                {context.map((m) => <LogMsg key={m.id} m={m} dim onSetWho={onSetWho} moveOpts={moveOpts} onMove={(to) => moveMsgHere(m.id, to)} />)}
                 <button style={S.rshCtxBtn} onClick={() => setShowCtx(false)}>これまでのやり取りを隠す</button>
               </>
             : <button style={S.rshCtxBtn} onClick={() => setShowCtx(true)}>これまでのやり取り {context.length}件を表示</button>
@@ -3518,7 +3563,8 @@ function ReplySheet({ project, onClose, onSaveRsug, onMarkSent, onAddLink, onNoR
               return (
                 <LogMsg key={m.id} m={m} target={!ex} tag={tag} dim={ex}
                   onSetWho={onSetWho} innerRef={i === 0 ? targetRef : undefined}
-                  excluded={ex} onToggleExcl={() => toggleExcl(m.id)} />
+                  excluded={ex} onToggleExcl={() => toggleExcl(m.id)}
+                  moveOpts={moveOpts} onMove={(to) => moveMsgHere(m.id, to)} />
               );
             });
           })()}
@@ -5379,6 +5425,12 @@ function statusSuggestion(p) {
   // ✕で却下済み（＝返信済み扱い。アイコンリアクション等で返した場合に使う）。新着が来るまで再提案しない
   if (p.sugAckAt && new Date(p.sugAckAt).getTime() >= new Date(last.at).getTime()) return { mark: "ok" };
   const dw = days <= 0 ? "今日" : days === 1 ? "昨日" : `${days}日前に`;
+  // 「本日をもって終了」等で締めている → 返信催促より優先して「完了」を提案
+  if (msgs.slice(-2).some((m) => isProjectEndMsg(m.body))) {
+    return { mark: "warn", suggest: "完了", reason: "終了の挨拶で締め" };
+  }
+  // 相手の最後がお礼・了解だけ（＝返信不要。アイコンリアクションで返す運用）なら催促しない
+  if (last.who === "client" && isClosingMsg(last.body)) return { mark: "ok" };
   if (last.who === "client") {
     // 相手待ち/支払い待ちに切り替えた時刻が相手の最新メッセージ以降なら「対応済み」とみなし提案しない
     // （例：PRIZMA等、ステータス変更で自動返信が飛び、自分の送信ログがHelmに残らない運用）
@@ -5390,7 +5442,12 @@ function statusSuggestion(p) {
   }
   // 自分の最後の発言が「こちらが対応する約束」なら、相手待ちではなく自分のターン
   const commitRe = /(改めて(ご連絡|お送り|ご報告|提出|ご案内)|(完了|でき|出来|上がり|整い|揃い)(しましたら|次第|いたしましたら)[^。]{0,30}(連絡|送り|報告|共有|反映|案内|URL)|(修正|作成|反映|実装|更新|調整|掲載|追加)(を|し)(、|て|)[^。]{0,30}(お送り|提出|ご連絡|ご報告|進め|参ります|まいります|反映|対応)|本日中に(対応|提出|お送り|ご連絡)|(修正|対応|作成|掲載|反映)を?(進め|いたし)ます|追って(ご連絡|お送り|ご報告|ご案内)|確認用URL[^。]{0,15}(ご連絡|お送り|共有))/;
-  const committed = commitRe.test(last.body || "");
+  // 段落単位で判定し、「ご要望がありましたら対応いたします」等の条件付きの申し出は約束に数えない
+  const committed = stripQuoted(last.body).split("\n").some((para) => {
+    if (!commitRe.test(para)) return false;
+    if (/(ましたら|いただければ|いただけましたら|あれば|場合は|お気軽|いつでも|ご相談|ご要望|案件ごと|都度|その際|ご依頼|必要が)/.test(para)) return false;
+    return true;
+  });
   if ((p.status === "相手待ち" || p.status === "支払い待ち") && committed) {
     return { mark: "warn", suggest: "進行中", reason: "「対応します」と約束済み・こちらのターン" };
   }
@@ -5473,12 +5530,29 @@ function replyNeeded(p) {
   return true;
 }
 
+// 引用（返信元の再掲）を落とす。引用内の「〜ください」等で要返信と誤判定するのを防ぐ
+function stripQuoted(body) {
+  return String(body || "")
+    .replace(/\[qt\][\s\S]*?\[\/qt\]/g, " ")
+    .replace(/\[qtmeta[^\]]*\]/g, " ")
+    .replace(/\[rp\s[^\]]*\]/g, " ")
+    .split("\n").filter((l) => !/^\s*[>＞|｜]/.test(l)).join("\n").trim();
+}
 function isClosingMsg(body) {
-  const b = (body || "").trim();
-  if (!b || b.length > 60) return false;
+  const b = stripQuoted(body);
+  if (!b || b.length > 220) return false;
   if (/[？?]/.test(b)) return false;
-  if (/(ください|いただけ|もらえ|でしょうか|ますか|お待ちして)/.test(b)) return false;
-  return /(よろしくお願い|ありがとうござ|承知(いた)?しました|了解(いた)?しました|かしこまりました|確認(でき|いたし|し)ました|助かります|問題ないです|問題ございません|大丈夫です)/.test(b);
+  // 依頼・質問の語がひとつでもあれば締めではない（「ご対応いただきありがとう」等の過去形は除く）
+  if (/(ください|下さい|いただけ|頂け|もらえ|でしょうか|ますか|願えま|お待ちして|教えて|ご確認のうえ|until|いつまで)/.test(b)) return false;
+  return /(よろしくお願い|ありがとうござ|感謝|承知(いた)?しました|了解(いた)?しました|かしこまりました|確認(でき|いたし|し)ました|助かり|問題ないです|問題ありません|問題ございません|大丈夫です|お世話になりました)/.test(b);
+}
+// プロジェクト終了の合図（「本日をもって完了」＋締めの挨拶）→ 完了を提案する
+function isProjectEndMsg(body) {
+  const b = stripQuoted(body);
+  if (!b) return false;
+  const end = /(をもって|を持って)[^。\n]{0,20}(終了|完了)|(プロジェクト|案件|契約|お取引|ご契約)[^。\n]{0,8}(終了|完了)|一旦[、,]?\s*(終了|完了)|(終了|完了)(という形|ということ|とさせて|ですね|でよろしく|となります)/;
+  const bye = /(お世話になりました|ありがとうございました|お疲れ様でした|お疲れさまでした)/;
+  return end.test(b) && bye.test(b);
 }
 
 const claudeProjectLinkOf = (p) => ((p && p.links) || []).find((l) => /claude\.ai\/project\//.test(l.url || ""));
@@ -5548,6 +5622,22 @@ const isDupTaskTitle = (title, tasks) => (tasks || []).some((t) => !t.done && ti
 // 表示用：既存タスクと重複する候補を除いた残り（保存後に手動追加されたケースも表示段階で吸収）
 const liveTsqItems = (p) => (p && p.tsq && p.tsq.items ? p.tsq.items.filter((it) => !isDupTaskTitle(it.title, p.tasks)) : []);
 
+// 汎用語（プラットフォーム名・事務局・no-reply等）は照合キーにしない。
+// これを許すと「CW通知が1件でも入っている別案件」に、無関係なクライアントの通知が吸い寄せられる。
+const GENERIC_NAME = /^(クラウドワークス|crowdworks|ランサーズ|lancers|ココナラ|coconala|チャットワーク|chatwork|gmail|google|事務局|運営|運営事務局|サポート|support|info|contact|noreply|no-reply|donotreply|admin|system|mail|message|メッセージ|通知|お知らせ|相手|クライアント)$/;
+// 「【クラウドワークス】sugi_barcelona さん」→「sugi_barcelona」
+const peelName = (s) => String(s || "").replace(/[【\[][^】\]]*[】\]]/g, " ").replace(/[\s　]*(さん|様)$/, "").trim();
+// CW／ランサーズのスレッドID（案件ごとに固有）。一致すればその案件で確定できる
+function threadKeys(text) {
+  const t = String(text || ""); const out = new Set();
+  (t.match(/crowdworks\.jp\/messages\/(\d+)/g) || []).forEach((u) => out.add("cw:" + u.split("/").pop()));
+  (t.match(/boardId=(\d+)/g) || []).forEach((u) => out.add("lc:" + u.split("=").pop()));
+  return out;
+}
+const projThreadKeys = (p) => threadKeys(
+  [p.replyUrl || ""].concat(((p.links || []).map((l) => l.url || "")), ((p.msgs || []).map((m) => m.curl || ""))).join(" ")
+);
+
 // メールを案件に照合：クライアント名・差出人・件名を、案件名とログの登場人物に突き合わせる
 function matchMailToProject(mail, projects) {
   const norm = (s) => (s || "").toLowerCase().replace(/[\s　]/g, "");
@@ -5556,25 +5646,29 @@ function matchMailToProject(mail, projects) {
     .replace(/[ァィゥェォッャュョヮ]/g, (c) => ({ "ァ": "ア", "ィ": "イ", "ゥ": "ウ", "ェ": "エ", "ォ": "オ", "ッ": "ツ", "ャ": "ヤ", "ュ": "ユ", "ョ": "ヨ", "ヮ": "ワ" }[c] || c))
     .replace(/ウエブ/g, "web");
   const mailFold = fold((mail.subject || "") + " " + String(mail.body || mail.excerpt || "").slice(0, 1000));
-  const keys = [mail.client, mail.fromName, (mail.from || "").split("@")[0]].map(norm).filter((s) => s.length >= 2);
+  const keys = [mail.client, mail.fromName, (mail.from || "").split("@")[0]]
+    .map((x) => norm(peelName(x))).filter((x) => x.length >= 2 && !GENERIC_NAME.test(x));
+  const mailTh = threadKeys((mail.body || "") + " " + (mail.excerpt || ""));
   const subj = norm(mail.subject);
   let best = null, bestScore = 0;
   for (const p of projects) {
     if (p.id === INBOX_ID || p.status === "完了") continue;
     const names = new Set([(p.company || "")].concat((p.msgs || []).map((m) => m.name || "")));
     let score = 0;
+    // スレッドID一致＝確定（CW／ランサーズは相手の表示名が案件名と一致しないのが普通）
+    if (mailTh.size) { const pt = projThreadKeys(p); for (const k of mailTh) { if (pt.has(k)) score = 5; } }
     for (const raw of names) {
-      const n = norm(raw);
-      if (n.length < 2) continue;
+      const n = norm(peelName(raw));
+      if (n.length < 2 || GENERIC_NAME.test(n)) continue;
       for (const k of keys) { if (k && (n.includes(k) || k.includes(n))) score = Math.max(score, 3); }
       if (subj && n.length >= 3 && subj.includes(n)) score = Math.max(score, 2);
     }
     // 本文・件名に案件名（会社名）が含まれていれば強一致（共有アドレス・複数担当者でも拾う）
     const compFold = fold(p.company);
     if (compFold.length >= 4 && mailFold.includes(compFold)) score = Math.max(score, 3);
-    // プラットフォーム整合で加点
-    if (score > 0 && mail.kind === "cw" && p.platform === "クラウドワークス") score += 1;
-    if (score > 0 && mail.kind === "lancers" && p.platform === "ランサーズ") score += 1;
+    // プラットフォーム整合で加点（スレッドID確定分には加点しない）
+    if (score > 0 && score < 5 && mail.kind === "cw" && p.platform === "クラウドワークス") score += 1;
+    if (score > 0 && score < 5 && mail.kind === "lancers" && p.platform === "ランサーズ") score += 1;
     if (score > bestScore) { bestScore = score; best = p; }
   }
   return bestScore >= 3 ? best : null;
@@ -6489,6 +6583,10 @@ const S = {
   logItemDim: { opacity: 0.62 },
   logExclBtn: { marginLeft: 6, border: `1px solid ${C.line}`, borderRadius: 6, background: "transparent", color: C.ink3, fontSize: 11, fontWeight: 700, padding: "2px 8px", cursor: "pointer", whiteSpace: "nowrap" },
   logExclBtnOn: { borderColor: C.accent, color: C.accent, background: "rgba(107,138,255,0.12)" },
+  logMoveBox: { border: `1px solid ${C.line}`, borderRadius: 8, padding: 8, background: C.panel2, display: "grid", gap: 6 },
+  logMoveHint: { fontSize: 11.5, color: C.ink3, lineHeight: 1.5 },
+  logMoveList: { display: "flex", flexWrap: "wrap", gap: 6 },
+  logMoveItem: { border: `1px solid ${C.line}`, borderRadius: 7, background: C.panel, color: C.ink, fontSize: 13, fontWeight: 700, padding: "6px 10px", cursor: "pointer", textAlign: "left" },
   logTargetTag: { marginLeft: "auto", fontSize: 11, fontWeight: 800, color: C.accent, background: "rgba(107,138,255,0.16)", borderRadius: 6, padding: "2px 7px", whiteSpace: "nowrap" },
   logWhoMe: { color: C.accent },
   logQuote: { fontSize: 12.5, color: C.ink3, whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.5, paddingLeft: 9, borderLeft: `2px solid ${C.line}` },
