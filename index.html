@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-04b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-04c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -5519,22 +5519,33 @@ function taskKeywords(title) {
   return Array.from(new Set(out)).filter((w) => !TASK_STOP.test(w));
 }
 // このタスク、実はもう終わっているのでは？の検知
-const DONE_REPORT = /(納品(いた)?しました|提出(いた)?しました|送付(いた)?しました|お送り(いた)?しました|送りました|完了(いた)?しました|反映(いた)?しました|対応(いた)?しました|修正(いた)?しました|アップ(いた)?しました|公開(いた)?しました|完成(いた)?しました|ご報告)/;
+// 「ご報告」「確認しました」のような汎用語は進捗報告にも使われるため、最終成果の動詞だけに絞る
+const DONE_REPORT = /(納品(いた)?しました|納品いたします|最終データ|完了(いた)?しました|校了|公開(いた)?しました|完成(いた)?しました)/;
+// 途中経過のしるし。これが含まれる報告は「まだ作業中」なので完了提案しない
+const PARTIAL_REPORT = /(初校|たたき台|ドラフト|進捗|途中|一部|先行して|準備|着手|進めて(まいり|いき)|お詫び|申し訳)/;
 function taskDoneSuggestion(p, t) {
   if (!p || !t || t.done || t.sugOff || t.repeat || t.kind === "reply") return null;
   // ① 案件が終わっているのにタスクだけ残っている
   if (p.status === "完了") return { reason: "案件は完了・このタスクも？" };
   if (p.status === "支払い待ち" && t.kind !== "payment") return { reason: "支払い待ちへ移行・作業は完了？" };
-  // ② 自分から「納品しました」等の報告を出していて、タスク名の語が本文に出てくる
+  // 期日が未来に設定されている＝まだやる予定のタスク。完了提案はしない
+  const jd = t.start || t.due;
+  if (jd && daysUntil(jd) !== null && daysUntil(jd) > 0) return null;
+  // ② 会話の最後が自分の「納品・完了」報告で、タスク名の語がその本文に出てくる。
+  //    報告の後に相手から新しい依頼・修正が来ていたら、ボールは戻っているので提案しない
+  const msgs = p.msgs || [];
+  if (!msgs.length) return null;
+  const last = msgs[msgs.length - 1];
+  let rep_ = null;
+  if (last.who === "me") rep_ = last;
+  else if (isClosingMsg(last.body) && msgs.length >= 2 && msgs[msgs.length - 2].who === "me") rep_ = msgs[msgs.length - 2];
+  if (!rep_) return null;
+  const b = stripQuoted(rep_.body);
+  if (!DONE_REPORT.test(b) || PARTIAL_REPORT.test(b)) return null;
   const words = taskKeywords(t.title);
   if (!words.length) return null;
-  const mine = (p.msgs || []).filter((m) => m.who === "me").slice(-3);
-  for (const m of mine) {
-    const b = stripQuoted(m.body);
-    if (!DONE_REPORT.test(b)) continue;
-    const hit = words.filter((w) => b.indexOf(w) >= 0);
-    if (hit.length >= 2 || (hit.length === 1 && hit[0].length >= 4)) return { reason: "報告済みのようです・完了では？" };
-  }
+  const hit = words.filter((w) => b.indexOf(w) >= 0);
+  if (hit.length >= 2 || (hit.length === 1 && hit[0].length >= 4)) return { reason: "納品・完了の報告済みでは？" };
   return null;
 }
 
