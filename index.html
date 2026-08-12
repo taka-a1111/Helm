@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-04c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-04d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -839,8 +839,16 @@ export default function App() {
         const openTitles = (target.tasks || []).filter((t) => !t.done).map((t) => t.title).filter(Boolean);
         const j = await analyzeIncomingMsg(target.company, recentLog, openTitles);
         if (editingRef2.current) return; // 解析中に編集が始まったら破棄（次回やり直し）
-        const items = (j.tasks || []).filter((t) => t && t.title && !isDupTaskTitle(t.title, target.tasks)).slice(0, 4)
+        const newItems = (j.tasks || []).filter((t) => t && t.title && !isDupTaskTitle(t.title, target.tasks)).slice(0, 2)
           .map((t) => ({ title: String(t.title).slice(0, 40), note: String(t.note || ""), due: /^\d{4}-\d{2}-\d{2}$/.test(t.due || "") ? t.due : "", urgent: !!t.urgent }));
+        // 既存タスクへの追記提案：対象タスクが実在する（未完了）ものだけ通す
+        const appendItems = (j.appends || []).filter((a) => a && a.to && Array.isArray(a.lines) && a.lines.length)
+          .map((a) => {
+            const tk = (target.tasks || []).find((t) => !t.done && (t.title === a.to || titleSim(a.to, t.title) >= 0.75));
+            return tk ? { append: true, tid: tk.id, title: tk.title,
+              note: a.lines.map((l) => String(l).trim()).filter(Boolean).map((l) => /^[・\-—]/.test(l) ? l : "・" + l).join("\n") } : null;
+          }).filter(Boolean).slice(0, 2);
+        const items = [...appendItems, ...newItems];
         const cur = projectsRef.current || [];
         persist(cur.map((p) => p.id !== target.id ? p : {
           ...p, tsqSeen: cm.id,
@@ -4231,6 +4239,14 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
             const dropItem = (p, idx) => { const its = (p.tsq.items || []).filter((_, j) => j !== idx); return its.length ? { ...p.tsq, items: its } : null; };
             const addOne = (i) => { const it = items[i]; const idx = idxOf(it); setD((p) => { if (idx < 0) return p; return { ...p, tasks: isDup(it) ? p.tasks : [...p.tasks, mkTask(it)], tsq: dropItem(p, idx) }; }); };
             const ignoreOne = (i) => { const it = items[i]; const idx = idxOf(it); setD((p) => (idx < 0 ? p : { ...p, tsq: dropItem(p, idx) })); };
+            // 既存タスクの詳細欄末尾に追記し、完了間近で埋もれないよう「いつやる」を今日に引き上げ（未設定時のみ）
+            const applyAppend = (i) => { const it = items[i]; const idx = idxOf(it); setD((p) => { if (idx < 0) return p; return {
+              ...p, tsq: dropItem(p, idx),
+              tasks: p.tasks.map((t) => t.id !== it.tid ? t : {
+                ...t, note: (t.note ? t.note + "\n" : "") + it.note,
+                start: t.start || dStr(0), sugOff: false,
+              }),
+            }; }); };
             return (
             <div style={S.tsqBox}>
               <div style={S.tsqHead}>
@@ -4239,23 +4255,43 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
               </div>
               {items.map((it, i) => (
                 <div key={i} style={i > 0 ? { borderTop: `1px solid ${C.line}`, marginTop: 8, paddingTop: 8 } : {}}>
-                  <div style={S.tsqTitle}>{it.title}</div>
-                  {it.note && <div style={S.tsqNote}>{it.note}</div>}
-                  <div style={S.tsqDueTx}>
-                    いつやる：{it.urgent ? "今日（緊急）" : (new Date().getHours() < 17 ? "今日" : "明日")}
-                    {it.due ? `／期限：${it.due.slice(5).replace("-", "/")}` : ""}
-                  </div>
-                  <div style={{ ...S.tsqBtns, marginTop: 7 }}>
-                    <button style={S.tsqAdd} onClick={() => addOne(i)}>このタスクを追加</button>
-                    <button style={S.tsqIgnore} onClick={() => ignoreOne(i)}>無視</button>
-                  </div>
+                  {it.append ? (
+                    <>
+                      <div style={S.tsqTitle}>「{it.title}」に追記</div>
+                      {it.note && <div style={S.tsqNote}>{it.note}</div>}
+                      <div style={{ ...S.tsqBtns, marginTop: 7 }}>
+                        <button style={S.tsqAdd} onClick={() => applyAppend(i)}>詳細欄に追記する</button>
+                        <button style={S.tsqIgnore} onClick={() => ignoreOne(i)}>無視</button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={S.tsqTitle}>{it.title}</div>
+                      {it.note && <div style={S.tsqNote}>{it.note}</div>}
+                      <div style={S.tsqDueTx}>
+                        いつやる：{it.urgent ? "今日（緊急）" : (new Date().getHours() < 17 ? "今日" : "明日")}
+                        {it.due ? `／期限：${it.due.slice(5).replace("-", "/")}` : ""}
+                      </div>
+                      <div style={{ ...S.tsqBtns, marginTop: 7 }}>
+                        <button style={S.tsqAdd} onClick={() => addOne(i)}>このタスクを追加</button>
+                        <button style={S.tsqIgnore} onClick={() => ignoreOne(i)}>無視</button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
               {items.length > 1 && (
                 <div style={{ ...S.tsqBtns, borderTop: `1px solid ${C.line}`, marginTop: 10, paddingTop: 10 }}>
                   <button style={S.tsqAdd} onClick={() => {
-                    setD((p) => ({ ...p, tasks: [...p.tasks, ...(p.tsq.items || []).filter((it) => !isDup(it)).map(mkTask)], tsq: null }));
-                  }}>すべて追加（{items.length}件）</button>
+                    setD((p) => {
+                      let tasks = p.tasks;
+                      (p.tsq.items || []).forEach((it) => {
+                        if (it.append) tasks = tasks.map((t) => t.id !== it.tid ? t : { ...t, note: (t.note ? t.note + "\n" : "") + it.note, start: t.start || dStr(0), sugOff: false });
+                        else if (!isDup(it)) tasks = [...tasks, mkTask(it)];
+                      });
+                      return { ...p, tasks, tsq: null };
+                    });
+                  }}>すべて反映（{items.length}件）</button>
                   <button style={S.tsqIgnore} onClick={() => set("tsq", null)}>すべて無視</button>
                 </div>
               )}
@@ -5715,7 +5751,7 @@ const driveFolderLinkOf = (p) => ((p && p.links) || []).find((l) => /drive\.goog
 // --- ログの新着（相手の最新メッセージ）から依頼を検出しタスク候補を作る（Sonnet・承認制） ---
 // 粒度ルール：報告タイミングが同じものは1件にまとめ、内訳は詳細(note)へ。1メッセージから原則1件。
 async function analyzeIncomingMsg(companyName, recentLog, openTitles) {
-  const sys = 'あなたはフリーランス（高崎・屋号インフォサクセス）の案件管理アシスタントです。クライアントとの直近のやり取りログを読み、いま残っている宿題のタスク化と、返信要否の判定を行い、JSONだけを出力します。説明やコードブロック記法は付けないこと。\n{"tasks":[{"title":"タスク名（25字以内）","note":"内訳の箇条書き（各行を・で始め改行区切り。※既に完了報告済みの項目は含めない。内訳が1つだけ・不要なら空文字）","due":"YYYY-MM-DD（メッセージに期限・締切が明記されている場合のみ。無ければ空文字）","urgent":true|false}],"need_reply":true|false}\nneed_replyの規則：相手の最新メッセージに質問・依頼・確認・提案が含まれるならtrue。締めの挨拶・お礼のみ・こちらの対応不要な単なる報告ならfalse。迷ったら必ずtrue。\nタスクの分け方（重要）：同じ成果物・同じ資料への複数の指示は1件にまとめて内訳をnoteに入れる。ただし別の成果物・別の資料・別の対象物への指示は必ず別々のタスクに分ける（例：「サウナリストの修正」と「WEBセミナー資料の修正」は2件に分ける）。タスクが無ければ空配列 []。\n重複禁止（重要）：ユーザー入力に「登録済みタスク」の一覧が渡された場合、それと同じ内容・実質同じ作業のタスクは絶対に提案しない（言い回しが違っても作業が同じなら提案しない）。全て登録済みなら空配列。\nタスク判定基準（重要）：ログ全体を時系列で読み、相手からの依頼のうち「その後に自分（高崎）が完了・提出・送付・反映済みと報告していないもの」だけをタスク化する。全て対応済み、または挨拶・お礼・進捗確認・支払い連絡のみなら tasks は空配列。\nurgentの規則：至急・本日中・今日中・ASAPなど緊急性が高い表現があればtrue、通常はfalse。今日は' + dStr(0) + '。';
+  const sys = 'あなたはフリーランス（高崎・屋号インフォサクセス）の案件管理アシスタントです。クライアントとの直近のやり取りログを読み、いま残っている宿題のタスク化と、返信要否の判定を行い、JSONだけを出力します。説明やコードブロック記法は付けないこと。\n{"tasks":[{"title":"タスク名（25字以内）","note":"内訳の箇条書き（各行を・で始め改行区切り。※既に完了報告済みの項目は含めない。内訳が1つだけ・不要なら空文字）","due":"YYYY-MM-DD（メッセージに期限・締切が明記されている場合のみ。無ければ空文字）","urgent":true|false}],"appends":[{"to":"登録済みタスク名（一覧の表記と完全一致）","lines":["・追加指示の要約（1行ずつ）"]}],"need_reply":true|false}\nneed_replyの規則：相手の最新メッセージに質問・依頼・確認・提案が含まれるならtrue。締めの挨拶・お礼のみ・こちらの対応不要な単なる報告ならfalse。迷ったら必ずtrue。\nタスクの粒度（最重要）：タスクは「成果物・納品物」の単位で立てる。1メッセージからは原則1件、絶対に2件まで。修正指摘・確認事項・細かい作業項目はタスクにせず、noteの箇条書きに入れる。「LP修正5点」は5タスクではなく1タスク＋note5行。別々の成果物への指示（例：「サウナリストの修正」と「WEBセミナー資料の修正」）だけ2件に分けてよい。タスクが無ければ空配列 []。\n追記（重要）：新しい指示が「登録済みタスク」のいずれかと同じ成果物に対するものなら、新タスクにせず appends に入れる（toは一覧の表記をそのまま書く）。例：LP制作タスクが登録済みで修正依頼が来た → appends。追記が無ければ appends は空配列。\n重複禁止（重要）：登録済みタスクと同じ内容・実質同じ作業のタスクは絶対に提案しない（言い回しが違っても作業が同じなら提案しない）。\nタスク判定基準（重要）：ログ全体を時系列で読み、相手からの依頼のうち「その後に自分（高崎）が完了・提出・送付・反映済みと報告していないもの」だけをタスク化する。全て対応済み、または挨拶・お礼・進捗確認・支払い連絡のみなら tasks は空配列。\nurgentの規則：至急・本日中・今日中・ASAPなど緊急性が高い表現があればtrue、通常はfalse。今日は' + dStr(0) + '。';
   const taskCtx = (openTitles && openTitles.length) ? `\n\n登録済みタスク（これらと同内容は提案しない）:\n${openTitles.map((t) => "・" + t).join("\n")}` : "";
   const out = await callClaude({ system: sys, user: `案件「${companyName || ""}」の直近のやり取り（時系列）:\n\n${recentLog}${taskCtx}`, maxTokens: 900 });
   const clean = out.replace(/```json|```/g, "").trim();
@@ -5758,7 +5794,8 @@ function titleSim(a, b) {
 }
 const isDupTaskTitle = (title, tasks) => (tasks || []).some((t) => !t.done && titleSim(title, t.title) >= 0.75);
 // 表示用：既存タスクと重複する候補を除いた残り（保存後に手動追加されたケースも表示段階で吸収）
-const liveTsqItems = (p) => (p && p.tsq && p.tsq.items ? p.tsq.items.filter((it) => !isDupTaskTitle(it.title, p.tasks)) : []);
+const liveTsqItems = (p) => (p && p.tsq && p.tsq.items ? p.tsq.items.filter((it) =>
+  it.append ? (p.tasks || []).some((t) => t.id === it.tid && !t.done) : !isDupTaskTitle(it.title, p.tasks)) : []);
 
 // 汎用語（プラットフォーム名・事務局・no-reply等）は照合キーにしない。
 // これを許すと「CW通知が1件でも入っている別案件」に、無関係なクライアントの通知が吸い寄せられる。
