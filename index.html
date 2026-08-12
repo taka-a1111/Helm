@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-04g"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-04h"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -5576,6 +5576,9 @@ function taskDoneSuggestion(p, t) {
   const tb = bigramsOf(t.title);
   if (tb.length < 3) return null;
   const REQ = /(お願い|ください|下さい|いただけ|頂け|でしょうか|ますか|修正|変更|追加|再度|もう一度)/;
+  // 相手からの催促（対応状況・目処・リマインド等）が来ている＝何かのボールはこちら。完了提案は全て止める
+  const REMIND = /(対応状況|ご対応いかが|進捗いかが|状況いかが|目処|目途|めど|お待ちしております|リマインド|その後いかが|いつ頃(対応|可能)|お時間経って)/;
+  if (msgs.slice(-4).some((x) => x.who === "client" && REMIND.test(stripQuoted(x.body)))) return null;
   for (let i = msgs.length - 1; i >= 0 && i >= msgs.length - 6; i--) {
     const m = msgs[i];
     if (m.who !== "me") continue;
@@ -5589,7 +5592,7 @@ function taskDoneSuggestion(p, t) {
     const bounced = msgs.slice(i + 1).some((x) => {
       if (x.who !== "client") return false;
       const xb = stripQuoted(x.body);
-      return REQ.test(xb) && bigramOverlap(tb, xb) >= 0.4;
+      return REQ.test(xb) && bigramOverlap(tb, xb) >= 0.3;
     });
     if (!bounced) return { reason: "納品・完了の報告済みでは？" };
   }
