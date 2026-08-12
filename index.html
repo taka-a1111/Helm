@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-04e"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-04g"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1564,8 +1564,9 @@ export default function App() {
     const needReply = active.reduce((s, p) => s + replyTasksOf(p).length, 0);
     const weekDue = active.reduce((s, p) => s + dueDaysList(p).filter((n) => n >= 0 && n <= 7).length, 0);
     const overdue = active.reduce((s, p) => s + dueDaysList(p).filter((n) => n < 0).length, 0);
-    const revenue = active.reduce((s, p) => s + (Number(p.reward) || 0), 0);
-    return { needReply, weekDue, overdue, inProgress: active.length, revenue };
+    const earning = active.filter((p) => p.status !== "支払い待ち");
+    const revenue = earning.reduce((s, p) => s + (Number(p.reward) || 0), 0);
+    return { needReply, weekDue, overdue, inProgress: earning.length, revenue };
   }, [active]);
 
   if (loading) return (
@@ -1886,7 +1887,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
       .sort((a, b) => minDue(a) - minDue(b)),
     overdue: projects.filter((p) => p.status !== "完了" && p.id !== INBOX_ID && dueDaysList(p).some((n) => n < 0))
       .sort((a, b) => minDue(a) - minDue(b)),
-    progress: [...projects].sort((a, b) => (Number(b.reward) || 0) - (Number(a.reward) || 0)),
+    progress: projects.filter((p) => p.status !== "完了" && p.status !== "支払い待ち" && p.id !== INBOX_ID).sort((a, b) => (Number(b.reward) || 0) - (Number(a.reward) || 0)),
   };
 
   const cards = [
