@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-04h"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-04i"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -5557,7 +5557,7 @@ function taskKeywords(title) {
 }
 // このタスク、実はもう終わっているのでは？の検知
 // 「ご報告」「確認しました」のような汎用語は進捗報告にも使われるため、最終成果の動詞だけに絞る
-const DONE_REPORT = /(納品(いた)?しました|納品いたします|最終データ|完了(いた)?しました|校了|公開(いた)?しました|完成(いた)?しました|反映(いた)?しました|対応(いた)?しました|非表示にいたしました|削除(いた)?しました|設定(いた)?しました)/;
+const DONE_REPORT = /(納品(いた)?しました|納品いたします|最終データ|完了(いた)?しました|校了|公開(いた)?しました|完成(いた)?しました|反映(いた)?しました|対応(いた)?しました|非表示にいたしました|削除(いた)?しました|設定(いた)?しました|変更(いた)?しました|修正(いた)?しました|追加(いた)?しました|更新(いた)?しました|実装(いた)?しました|統一(いた)?しました|調整(いた)?しました)/;
 // 途中経過のしるし。これが含まれる報告は「まだ作業中」なので完了提案しない
 const PARTIAL_REPORT = /(初校|たたき台|ドラフト|進捗|途中|一部|先行して|準備|着手|進めて(まいり|いき)|お詫び|申し訳)/;
 function taskDoneSuggestion(p, t) {
@@ -5587,7 +5587,7 @@ function taskDoneSuggestion(p, t) {
     // ■見出し or 空行で段落に割り、完了動詞を含む段落とタスク名の重なりを見る
     const secs = b.split(/\n(?=■)|\n\s*\n/);
     const matched = secs.some((sec) =>
-      /(いたしました|しました|済み)/.test(sec) && bigramOverlap(tb, sec) >= 0.4);
+      DONE_REPORT.test(sec) && bigramOverlap(tb, sec) >= 0.4);
     if (!matched) continue;
     const bounced = msgs.slice(i + 1).some((x) => {
       if (x.who !== "client") return false;
