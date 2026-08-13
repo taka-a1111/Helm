@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-04i"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-04j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -467,6 +467,21 @@ const dueDaysList = (p) => {
     if (!t.done && t.kind !== "reply") { const n = daysUntil(taskJudgeDate(t)); if (n !== null) arr.push(n); }
   });
   return arr;
+};
+// 「今日」レーンにいて、いつやる(start)が過去日のまま止まっているタスク。
+// 期限(due)には触れないので、期限超過の赤表示や納期の情報は失われない
+const staleTodayTasks = (projects) => {
+  const out = [];
+  (projects || []).forEach((p) => {
+    if (p.status === "完了") return;
+    (p.tasks || []).forEach((t) => {
+      if (t.done || t.kind === "reply") return;
+      if (laneOf(p, t) !== "today") return;
+      const n = daysUntil(t.start);
+      if (n !== null && n < 0) out.push({ pid: p.id, tid: t.id });
+    });
+  });
+  return out;
 };
 // 締切候補を「名前＋日数」で返す（一覧でタスク名を出すため）
 const dueItemsOf = (p) => {
@@ -1470,6 +1485,17 @@ export default function App() {
     persist(projects.map((p) => p.id !== pid ? p : {
       ...p, tasks: p.tasks.map((t) => t.id === tid ? { ...t, due } : t),
     }));
+  // 「今日」レーンの過去日の「いつやる」をまとめて今日に。期限(due)は変更しない
+  const rollStartsToToday = () => {
+    const ps = projectsRef.current || [];
+    const hit = staleTodayTasks(ps);
+    if (!hit.length) return;
+    const key = new Set(hit.map((h) => h.pid + "/" + h.tid));
+    persist(ps.map((p) => ({
+      ...p,
+      tasks: (p.tasks || []).map((t) => key.has(p.id + "/" + t.id) ? { ...t, start: dStr(0) } : t),
+    })));
+  };
   const changeStart = (pid, tid, start) =>
     persist(projects.map((p) => p.id !== pid ? p : {
       ...p, tasks: p.tasks.map((t) => t.id === tid ? { ...t, start } : t),
@@ -1648,10 +1674,10 @@ export default function App() {
               </div>
               {focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
               {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} heldRank={held.projRank} />}
-              {focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
+              {focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             </div>
             <div style={S.triCol}>
-              <TasksView forceNarrow projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onNoReply={markNoReply} activeLane={paneLane} setActiveLane={setPaneLane} heldLane={held.taskLane} />
+              <TasksView forceNarrow projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={paneLane} setActiveLane={setPaneLane} heldLane={held.taskLane} />
             </div>
             <div style={S.triCol}>
               <CalendarView projects={projects} onOpen={openProject} forceNarrow />
@@ -1662,7 +1688,7 @@ export default function App() {
             {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
             {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
             {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} heldRank={held.projRank} />}
-            {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
+            {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
           </>
         )}
@@ -2715,7 +2741,7 @@ function InboxPanel() {
   );
 }
 
-function TasksView({ projects, onToggle, onWip, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderProject, onReorderCommit, onToggleProject, onSetStatus, onOpenReply, onAckSug, onAckTaskSug, onNoReply, activeLane, setActiveLane, singleLane, heldLane, forceNarrow }) {
+function TasksView({ projects, onToggle, onWip, onOpen, onOpenTask, onEditTask, onChangeLane, onChangeDue, onChangeStart, onChangeKind, onAddTask, onReorderTask, onReorderProject, onReorderCommit, onToggleProject, onSetStatus, onOpenReply, onAckSug, onAckTaskSug, onRollToday, onNoReply, activeLane, setActiveLane, singleLane, heldLane, forceNarrow }) {
   const wide = useWideScreen() && !forceNarrow;
   const [adding, setAdding] = useState(null); // 追加中のレーンキー（null=なし）
   const [openDone, setOpenDone] = useState(() => new Set()); // アコーディオンで完了を開いているレーン
@@ -2931,6 +2957,7 @@ function TasksView({ projects, onToggle, onWip, onOpen, onOpenTask, onEditTask, 
                   <span style={{ ...S.laneDot, background: L.color }} />
                   <span style={S.kanColTitle}>{L.label}</span>
                   <span style={S.kanColCount}>{countOf(L.key)}</span>
+                  {L.key === "today" && <RollTodayBtn projects={projects} onRoll={onRollToday} style={S.rollBtnSm} />}
                   <button style={S.kanAdd} onClick={() => setAdding(adding === L.key ? null : L.key)}><Plus size={15} strokeWidth={2.6} /></button>
                 </div>
                 {adding === L.key && (
@@ -2990,6 +3017,7 @@ function TasksView({ projects, onToggle, onWip, onOpen, onOpenTask, onEditTask, 
         {!singleLane && <span style={{ ...S.laneDot, background: activeMeta.color }} />}
         {!singleLane && <span style={S.laneBarTitle}>{activeMeta.label}</span>}
         {singleLane && <span style={{ marginRight: "auto" }} />}
+        {activeLane === "today" && <RollTodayBtn projects={projects} onRoll={onRollToday} style={S.rollBtn} />}
         <button style={S.laneBarAdd} onClick={() => setAdding(adding ? null : activeLane)}>
           <Plus size={15} strokeWidth={2.6} /> 追加
         </button>
@@ -3255,6 +3283,19 @@ function TaskCheck({ done, wip, size = 18, onToggle, onWip }) {
   );
 }
 
+// 「今日に揃える」ボタン（2タップ確認）。対象が無いときは何も出さない
+function RollTodayBtn({ projects, onRoll, style }) {
+  const [arm, setArm] = useState(false);
+  const n = staleTodayTasks(projects).length;
+  if (!n) return null;
+  return (
+    <button style={{ ...style, ...(arm ? { borderColor: C.accent, color: C.accent, background: "rgba(107,138,255,0.12)" } : {}) }}
+      title="過去の「いつやる」を今日にまとめて更新（期限はそのまま）"
+      onClick={() => { if (arm) { setArm(false); onRoll && onRoll(); } else { setArm(true); setTimeout(() => setArm(false), 3000); } }}>
+      <CalendarDays size={14} strokeWidth={2.4} />{arm ? `${n}件を今日にする` : "今日に揃える"}
+    </button>
+  );
+}
 function TaskCard({ t, lane, onToggle, onWip, onOpen, onOpenTask, onEditTask, onAckTaskSug, dragging, dragActive, onStartDrag, onChangeDue, onChangeStart, onChangeKind, onArrow, onDateMenu }) {
   // 長押し（400ms）で並べ替えドラッグ開始
   const lpTimer = useRef(null);
@@ -6678,6 +6719,8 @@ const S = {
 
   laneBar: { display: "flex", alignItems: "center", gap: 9 },
   laneBarTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 15.5, marginRight: "auto" },
+  rollBtn: { display: "flex", alignItems: "center", gap: 5, border: `1px solid ${C.line}`, background: C.panel, borderRadius: 9, padding: "7px 11px", fontSize: 13.5, fontWeight: 700, color: C.ink2, cursor: "pointer", whiteSpace: "nowrap" },
+  rollBtnSm: { display: "flex", alignItems: "center", gap: 4, border: `1px solid ${C.line}`, background: "transparent", borderRadius: 8, padding: "4px 8px", fontSize: 11.5, fontWeight: 700, color: C.ink3, cursor: "pointer", whiteSpace: "nowrap" },
   laneBarAdd: { display: "flex", alignItems: "center", gap: 4, border: `1px solid ${C.line}`, background: C.panel, borderRadius: 9, padding: "7px 12px", fontSize: 14.5, fontWeight: 700, color: C.ink },
 
   lane: { background: "#000000", border: "1.5px solid #2A323D", borderRadius: 14, padding: 11, display: "flex", flexDirection: "column", gap: 9, minHeight: 140, transition: "background 0.12s, border-color 0.12s" },
