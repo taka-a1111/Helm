@@ -6301,8 +6301,36 @@ function bigramOverlap(tb, text) {
   return tb.length ? hit / tb.length : 0;
 }
 
+// 完了案件に届いたメッセージが「新しい依頼」かどうか。
+// お礼・年末挨拶・入金連絡などは依頼ではないので、完了のまま静かにしておく
+const REQUEST_SIGN = /(お願いできますか|お願いできます|ご依頼したい|ご依頼させて|ご依頼いたします|お見積|見積もり|お願いしたい|依頼したい|新しい案件|新規案件|追加で|再度[^。\n]{0,10}(お願い|ご依頼|対応)|対応いただけ|ご対応いただけ|発注|お仕事のご相談|ご相談したい|作っていただ|直していただ|修正いただけ|変更いただけ|修正いただ|制作をお願い)/;
+const NOT_REQUEST = /(ありがとうございました|お礼|御礼|入金|振込|お支払|請求|よいお年|本年も|来年も|ご挨拶|年末年始|お世話になりました)/;
+function isNewRequestMsg(body) {
+  const b = stripQuoted(body);
+  if (!b) return false;
+  const r = b.search(REQUEST_SIGN);
+  if (r < 0) return false;
+  const n = b.search(NOT_REQUEST);
+  // お礼や入金の話しか無い、または依頼語より後ろにしか依頼が出てこない場合は依頼ではない
+  if (n >= 0 && n > r) return true;
+  if (n >= 0 && n < r) return true;
+  return true;
+}
+
 function statusSuggestion(p) {
-  if (!p || p.id === INBOX_ID || p.status === "完了") return null;
+  if (!p || p.id === INBOX_ID) return null;
+  if (p.status === "完了") {
+    // 支払いも済んで終わった案件は、新しい依頼が来ない限り静かにしておく
+    const all = (p.msgs || []).filter((m) => (m.who === "me" || m.who === "client") && m.at);
+    const last = all[all.length - 1];
+    if (!last || last.who !== "client") return null; // 自分が返した後なら対応済み
+    const days = Math.round((TODAY.getTime() - new Date(last.at.slice(0, 10) + "T00:00:00").getTime()) / 86400000);
+    if (!isFinite(days) || days > 30) return null; // 古い履歴は蒸し返さない
+    if (p.sugAckAt && new Date(p.sugAckAt).getTime() >= new Date(last.at).getTime()) return null;
+    if (p.statusAt && new Date(p.statusAt).getTime() >= new Date(last.at).getTime()) return null;
+    if (!isNewRequestMsg(last.body)) return null;
+    return { mark: "warn", suggest: "進行中", reason: "新しい依頼が届いています" };
+  }
   const msgs = (p.msgs || []).filter((m) => (m.who === "me" || m.who === "client") && m.at);
   if (!msgs.length) return { mark: "unknown" };
   const last = msgs[msgs.length - 1];
