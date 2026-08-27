@@ -1,130 +1,124 @@
-// api/freee.js — Helm用 freee収支API（Vercelサーバーレス関数）
+// api/freee.js — Helm用 freee収支API（Vercel Serverless Function）
 //
-// 役割：freeeの「取引」から月ごとの 収入 / 支出 / 差引 を集計して返すだけ。参照専用。
+// GASを使わず、Helmと同じVercelプロジェクト内で完結させる版。
+// 参照専用（freeeへの書き込みは一切しない）。
 //
-// ■ Vercelの環境変数（Settings → Environment Variables）
-//   FREEE_CLIENT_ID       792012945509393
-//   FREEE_CLIENT_SECRET   （アプリ詳細のClient Secret）
-//   FREEE_REFRESH_TOKEN   （初回に取得したrefresh_token）
-//   FREEE_COMPANY_ID      80198
-//   HELM_TOKEN            helm-cw-9k4w
+// ■ セットアップ
+//  1) このファイルを GitHub の taka-a1111/Helm に api/freee.js として置く
+//  2) Vercel → プロジェクト → Settings → Environment Variables に登録
+//       FREEE_CLIENT_ID
+//       FREEE_CLIENT_SECRET
+//       FREEE_REFRESH_TOKEN
+//       FREEE_COMPANY_ID      80198
+//       HELM_TOKEN            helm-cw-9k4w
+//       KV_REST_API_URL       （Vercel KV を接続すると自動で入る）
+//       KV_REST_API_TOKEN     （同上）
+//  3) 再デプロイ
 //
-// ■ 呼び出し
-//   /api/freee?t=helm-cw-9k4w            … 今年の月次
-//   /api/freee?t=helm-cw-9k4w&year=2025  … 年を指定
+// ■ 使い方
+//   GET /api/freee?t=helm-cw-9k4w            … 今年の月次
+//   GET /api/freee?t=helm-cw-9k4w&year=2025  … 年を指定
 //
-// ■ refresh_tokenのローテーションについて
-//   freeeはrefresh_tokenを使うたびに新しいものへ入れ替える。Vercelの関数からは
-//   環境変数を書き換えられないため、取得した新しいtokenはSupabaseの helm_secrets に保存する。
-//   （テーブルが無い場合は環境変数のtokenを使い続けるので、期限切れ時に再設定が必要）
+// ■ refresh_token のローテーションについて
+//   freeeは refresh_token を1回使うと新しいものに差し替える。
+//   Vercelの環境変数は実行中に書き換えられないため、更新後のトークンは
+//   Vercel KV に保存して次回以降そちらを優先して使う。
+//   KVを繋がない場合も動くが、環境変数のトークンが失効した時点で
+//   認可からやり直しになるので、KVの接続を推奨。
 
-const FREEE_API = "https://api.freee.co.jp/api/1";
-const FREEE_TOKEN_URL = "https://accounts.secure.freee.co.jp/public_api/token";
-const SUPABASE_URL = "https://fgbqheodukryhcmrjucn.supabase.co";
-const SUPABASE_KEY = "sb_publishable_gGLBPr0f3AqjdvNlgJk5dA_pBQjWfHP";
-const SECRET_ROW = "freee_refresh";
+const TOKEN_URL = "https://accounts.secure.freee.co.jp/public_api/token";
+const API = "https://api.freee.co.jp/api/1";
+const KV_KEY = "freee:refresh_token";
 
-async function loadRefreshToken() {
+async function kvGet() {
+  const url = process.env.KV_REST_API_URL, tok = process.env.KV_REST_API_TOKEN;
+  if (!url || !tok) return null;
   try {
-    const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/helm_secrets?id=eq.${SECRET_ROW}&select=value`,
-      { headers: { apikey: SUPABASE_KEY } }
-    );
-    if (!r.ok) return null;
-    const rows = await r.json();
-    return (rows && rows[0] && rows[0].value) || null;
-  } catch {
-    return null;
-  }
+    const r = await fetch(`${url}/get/${KV_KEY}`, { headers: { Authorization: `Bearer ${tok}` } });
+    const j = await r.json();
+    return j && j.result ? j.result : null;
+  } catch { return null; }
 }
 
-async function saveRefreshToken(value) {
+async function kvSet(value) {
+  const url = process.env.KV_REST_API_URL, tok = process.env.KV_REST_API_TOKEN;
+  if (!url || !tok) return;
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/helm_secrets`, {
+    await fetch(`${url}/set/${KV_KEY}`, {
       method: "POST",
-      headers: {
-        apikey: SUPABASE_KEY,
-        "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates",
-      },
-      body: JSON.stringify({ id: SECRET_ROW, value, updated_at: new Date().toISOString() }),
+      headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" },
+      body: JSON.stringify(value),
     });
-  } catch {
-    /* 保存できなくても今回の取得は成功しているので握りつぶす */
-  }
+  } catch {}
 }
 
 async function accessToken() {
-  const stored = await loadRefreshToken();
-  const refresh = stored || process.env.FREEE_REFRESH_TOKEN;
-  const res = await fetch(FREEE_TOKEN_URL, {
+  const refresh = (await kvGet()) || process.env.FREEE_REFRESH_TOKEN;
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    client_id: process.env.FREEE_CLIENT_ID,
+    client_secret: process.env.FREEE_CLIENT_SECRET,
+    refresh_token: refresh,
+  });
+  const r = await fetch(TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      client_id: process.env.FREEE_CLIENT_ID,
-      client_secret: process.env.FREEE_CLIENT_SECRET,
-      refresh_token: refresh,
-    }),
+    body,
   });
-  const body = await res.json();
-  if (!body.access_token) throw new Error("token: " + JSON.stringify(body).slice(0, 200));
-  if (body.refresh_token && body.refresh_token !== refresh) await saveRefreshToken(body.refresh_token);
-  return body.access_token;
+  const j = await r.json();
+  if (!j.access_token) throw new Error("token: " + JSON.stringify(j));
+  if (j.refresh_token) await kvSet(j.refresh_token);
+  return j.access_token;
 }
 
-async function fetchDeals(token, type, from, to, companyId) {
-  const out = [];
-  for (let offset = 0; offset < 3000; offset += 100) {
-    const url = `${FREEE_API}/deals?company_id=${companyId}&type=${type}` +
+async function fetchDeals(token, type, from, to) {
+  const cid = process.env.FREEE_COMPANY_ID;
+  let out = [], offset = 0;
+  for (let i = 0; i < 30; i++) {
+    const u = `${API}/deals?company_id=${cid}&type=${type}` +
       `&start_issue_date=${from}&end_issue_date=${to}&limit=100&offset=${offset}`;
-    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}`, accept: "application/json" } });
-    if (!r.ok) throw new Error(`${type}: ${(await r.text()).slice(0, 200)}`);
-    const ds = ((await r.json()) || {}).deals || [];
-    out.push(...ds);
+    const r = await fetch(u, { headers: { Authorization: `Bearer ${token}`, accept: "application/json" } });
+    if (!r.ok) throw new Error(`${type}: ${r.status} ${await r.text()}`);
+    const ds = (await r.json()).deals || [];
+    out = out.concat(ds);
     if (ds.length < 100) break;
+    offset += 100;
   }
   return out;
 }
 
-function sumByMonth(deals) {
-  const m = {};
-  for (const d of deals) {
-    const k = String(d.issue_date || "").slice(0, 7);
-    if (!k) continue;
-    m[k] = (m[k] || 0) + (Number(d.amount) || 0);
-  }
+const byMonth = (deals) => deals.reduce((m, d) => {
+  const k = String(d.issue_date || "").slice(0, 7);
+  if (k) m[k] = (m[k] || 0) + (Number(d.amount) || 0);
   return m;
-}
+}, {});
 
 export default async function handler(req, res) {
-  res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=3600");
+  res.setHeader("Access-Control-Allow-Origin", "*");
   try {
     if ((req.query.t || "") !== process.env.HELM_TOKEN) {
       return res.status(401).json({ ok: false, error: "bad token" });
     }
-    const companyId = process.env.FREEE_COMPANY_ID || "80198";
-    const jst = new Date(Date.now() + 9 * 3600 * 1000);
-    const year = Number(req.query.year) || jst.getUTCFullYear();
+    const nowJst = new Date(Date.now() + 9 * 3600 * 1000);
+    const year = Number(req.query.year) || nowJst.getUTCFullYear();
     const token = await accessToken();
     const [inc, exp] = await Promise.all([
-      fetchDeals(token, "income", `${year}-01-01`, `${year}-12-31`, companyId),
-      fetchDeals(token, "expense", `${year}-01-01`, `${year}-12-31`, companyId),
+      fetchDeals(token, "income", `${year}-01-01`, `${year}-12-31`),
+      fetchDeals(token, "expense", `${year}-01-01`, `${year}-12-31`),
     ]);
-    const I = sumByMonth(inc), E = sumByMonth(exp);
+    const I = byMonth(inc), E = byMonth(exp);
     const months = [];
     for (let i = 1; i <= 12; i++) {
-      const key = `${year}-${String(i).padStart(2, "0")}`;
-      const a = I[key] || 0, b = E[key] || 0;
-      if (!a && !b) continue;
-      months.push({ month: key, income: a, expense: b, net: a - b });
+      const k = `${year}-${String(i).padStart(2, "0")}`;
+      const a = I[k] || 0, b = E[k] || 0;
+      if (a || b) months.push({ month: k, income: a, expense: b, net: a - b });
     }
-    const cur = `${year}-${String(jst.getUTCMonth() + 1).padStart(2, "0")}`;
-    const current = months.find((x) => x.month === cur) || { month: cur, income: 0, expense: 0, net: 0 };
-    const ytd = months.reduce(
-      (s, x) => ({ income: s.income + x.income, expense: s.expense + x.expense, net: s.net + x.net }),
-      { income: 0, expense: 0, net: 0 }
-    );
+    const cur = `${year}-${String(nowJst.getUTCMonth() + 1).padStart(2, "0")}`;
+    const current = months.find((m) => m.month === cur) || { month: cur, income: 0, expense: 0, net: 0 };
+    const ytd = months.reduce((s, m) => ({
+      income: s.income + m.income, expense: s.expense + m.expense, net: s.net + m.net,
+    }), { income: 0, expense: 0, net: 0 });
+    res.setHeader("Cache-Control", "s-maxage=1800, stale-while-revalidate=86400");
     return res.status(200).json({ ok: true, year, current, ytd, months, fetchedAt: new Date().toISOString() });
   } catch (e) {
     return res.status(200).json({ ok: false, error: String((e && e.message) || e) });
