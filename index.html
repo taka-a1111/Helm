@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28i"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -751,8 +751,8 @@ export default function App() {
       } catch {}
     };
     cwPullRef.current = pull;
-    const t0 = setTimeout(pull, 4000); // フォールバック（通常は同期完了フックで先に走る）
-    const iv = setInterval(pull, 5 * 60 * 1000);
+    const t0 = setTimeout(pull, 2000); // フォールバック（通常は同期完了フックで先に走る）
+    const iv = setInterval(pull, 2 * 60 * 1000);
     const onVis = () => { if (document.visibilityState === "visible") pull(); };
     document.addEventListener("visibilitychange", onVis);
     return () => { stopped = true; clearTimeout(t0); clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
@@ -837,8 +837,8 @@ export default function App() {
       } catch {}
     };
     gmailPullRef.current = pull;
-    const t0 = setTimeout(pull, 7000); // フォールバック（通常は同期完了フックで先に走る）
-    const iv = setInterval(pull, 10 * 60 * 1000);
+    const t0 = setTimeout(pull, 3000); // フォールバック（通常は同期完了フックで先に走る）
+    const iv = setInterval(pull, 4 * 60 * 1000);
     const onVis = () => { if (document.visibilityState === "visible") pull(); };
     document.addEventListener("visibilitychange", onVis);
     return () => { stopped = true; clearTimeout(t0); clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
@@ -1780,8 +1780,8 @@ export default function App() {
         if (m && m[1] && m[1] !== BUILD_TAG) setNewBuild(m[1]);
       } catch (e) { /* 通信できないときは何もしない */ }
     };
-    const t0 = setTimeout(check, 5000);
-    const iv = setInterval(check, 3 * 60 * 1000);
+    const t0 = setTimeout(check, 2000);
+    const iv = setInterval(check, 90 * 1000);
     const onWake = () => { if (!document.hidden) check(); };
     document.addEventListener("visibilitychange", onWake);
     window.addEventListener("focus", onWake);
