@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-27f"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-27g"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -303,8 +303,10 @@ const yen = (v) => (v ? "¥" + v.toLocaleString("ja-JP") : "—");
 const yenMan = (v) => {
   const n = Number(v);
   if (!n) return "—";
-  const man = Math.round((n / 10000) * 10) / 10;
-  return (Number.isInteger(man) ? man.toString() : man.toFixed(1)) + "万円";
+  // 収支はマイナスもあるので符号を保つ（−1.1万円 のように表示）
+  const sign = n < 0 ? "−" : "";
+  const man = Math.round((Math.abs(n) / 10000) * 10) / 10;
+  return sign + (Number.isInteger(man) ? man.toString() : man.toFixed(1)) + "万円";
 };
 // 一覧用の日付ラベル：今日／N日前（期限切れ）／M月D日（曜）
 const WD_JP = ["日", "月", "火", "水", "木", "金", "土"];
@@ -1586,6 +1588,23 @@ export default function App() {
     persist((projectsRef.current || []).map((p) => ({
       ...p, tasks: (p.tasks || []).map((t) => t.isAuto ? { ...t, isAuto: null } : t),
     })));
+  // ── freee収支（/api/freee）───────────────────────────────
+  // サーバー側で30分キャッシュしているので、起動時と復帰時に取りにいくだけでよい
+  const [money, setMoney] = useState(null);
+  const pullMoney = async () => {
+    try {
+      const r = await fetch("/api/freee?t=helm-cw-9k4w&cb=" + Date.now());
+      const j = await r.json();
+      if (j && j.ok) setMoney(j);
+    } catch (e) { /* オフライン時は前回値のまま */ }
+  };
+  useEffect(() => {
+    pullMoney();
+    const t = setInterval(pullMoney, 30 * 60 * 1000);
+    const onWake = () => { if (!document.hidden) pullMoney(); };
+    document.addEventListener("visibilitychange", onWake);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", onWake); };
+  }, []);
   const markSent = (pid, text) => {
     const now = new Date();
     const at = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
@@ -1770,10 +1789,14 @@ export default function App() {
           </button>
         )}
         {wide && (
-          <div style={S.headerKpi} title="進行中の案件の見込み合計">
+          <div style={S.headerKpi} title="freeeの取引から集計した今月の収支">
             <Coins size={16} color="#E8ECF2" strokeWidth={2.2} />
-            <span style={S.headerKpiLabel}>進行中の見込み</span>
-            <span style={S.headerKpiValue}>{kpi.revenue ? yenMan(kpi.revenue) : "—"}</span>
+            <span style={S.headerKpiLabel}>
+              {money && money.current ? `${Number(money.current.month.slice(5))}月の収支` : "今月の収支"}
+            </span>
+            <span style={{ ...S.headerKpiValue, color: money && money.current && money.current.net < 0 ? "#FF8A8A" : "#51CF66" }}>
+              {money && money.current ? yenMan(money.current.net) : "—"}
+            </span>
           </div>
         )}
         <nav style={{ ...S.tabs, ...(wide ? {} : S.tabsSp) }}>
@@ -1805,7 +1828,7 @@ export default function App() {
                 <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />
               </div>
               {focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
-              {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} intakes={intakes} onApplyIntake={applyIntake} onDropIntake={closeIntake} onClearAuto={clearAutoMarks} heldRank={held.projRank} />}
+              {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} intakes={intakes} onApplyIntake={applyIntake} onDropIntake={closeIntake} onClearAuto={clearAutoMarks} money={money} heldRank={held.projRank} />}
               {focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             </div>
             <div style={S.triCol}>
@@ -1819,7 +1842,7 @@ export default function App() {
           <>
             {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
             {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
-            {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} intakes={intakes} onApplyIntake={applyIntake} onDropIntake={closeIntake} onClearAuto={clearAutoMarks} heldRank={held.projRank} />}
+            {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} intakes={intakes} onApplyIntake={applyIntake} onDropIntake={closeIntake} onClearAuto={clearAutoMarks} money={money} heldRank={held.projRank} />}
             {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
           </>
@@ -1906,7 +1929,7 @@ export default function App() {
 /* ============================================================
    フォーカス（ダッシュボード）
    ============================================================ */
-function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onWipTask, onToggleProject, onReorderTask, onMoveTask, onSetStatus, onOpenReply, onNoReply, onAckSug, onAckTaskSug, intakes, onApplyIntake, onDropIntake, onClearAuto, heldRank }) {
+function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onWipTask, onToggleProject, onReorderTask, onMoveTask, onSetStatus, onOpenReply, onNoReply, onAckSug, onAckTaskSug, intakes, onApplyIntake, onDropIntake, onClearAuto, money, heldRank }) {
   const [openCard, setOpenCard] = useState(null);
   const [openMsg, setOpenMsg] = useState(null);
   const [addingTop, setAddingTop] = useState(false); // 右上「＋追加」（今日のタスクとして追加）
@@ -2048,13 +2071,17 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
     progress: projects.filter((p) => p.status !== "完了" && p.status !== "支払い待ち" && p.id !== INBOX_ID).sort((a, b) => (Number(b.reward) || 0) - (Number(a.reward) || 0)),
   };
 
+  // 今月の実績（freee）＋未請求の見込み（Helm）
+  const cur = money && money.current;
   const cards = [
-    { key: "progress", label: "進行中の見込み", value: kpi.revenue ? yenMan(kpi.revenue) : "—", unit: "", color: "#E8ECF2", Icon: Coins, wide: true, count: kpi.inProgress },
+    { key: "money", label: cur ? `${Number(cur.month.slice(5))}月の収支` : "今月の収支",
+      value: cur ? yenMan(cur.net) : "—", unit: "", color: cur && cur.net < 0 ? "#FF8A8A" : "#51CF66", Icon: Coins },
+    { key: "progress", label: "未請求の見込み", value: kpi.revenue ? yenMan(kpi.revenue) : "—", unit: "", color: "#E8ECF2", Icon: Briefcase, count: kpi.inProgress },
   ];
 
-  const titleOf = { reply: "本日中に返信", weekDue: "7日以内が締切の案件", overdue: "期限を過ぎている案件", progress: "進行中の案件" };
+  const titleOf = { reply: "本日中に返信", weekDue: "7日以内が締切の案件", overdue: "期限を過ぎている案件", progress: "進行中の案件", money: "月ごとの収支（freee）" };
   const panelColor = cards.find((c) => c.key === openCard)?.color || C.accent;
-  const panelList = openCard === "reply" ? replyEntries : (openCard ? lists[openCard] : []);
+  const panelList = openCard === "reply" ? replyEntries : openCard === "money" ? ((money && money.months) || []) : (openCard ? lists[openCard] : []);
   const panelCount = (openCard === "weekDue" || openCard === "overdue")
     ? panelList.reduce((s, p) => s + dueItemsOf(p).filter((it) => openCard === "overdue" ? it.n < 0 : (it.n >= 0 && it.n <= 7)).length, 0)
     : panelList.length;
@@ -2093,11 +2120,27 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
           <div style={S.replyPanelHead}>
             <span style={{ ...S.replyPanelDot, background: panelColor }} />
             <span style={S.replyPanelTitle}>{titleOf[openCard]}</span>
-            <span style={S.replyPanelNum}>{panelCount}件</span>
+            {openCard !== "money" && <span style={S.replyPanelNum}>{panelCount}件</span>}
             <button style={S.replyPanelClose} onClick={() => setOpenCard(null)}><X size={17} /></button>
           </div>
           {panelList.length === 0 && <div style={S.replyPanelEmpty}>該当する項目はありません。</div>}
 
+          {openCard === "money" && (money && money.months || []).slice().reverse().map((m) => (
+            <div key={m.month} style={S.moneyRow}>
+              <span style={S.moneyMonth}>{Number(m.month.slice(5))}月</span>
+              <span style={S.moneyIn}>+{yenMan(m.income)}</span>
+              <span style={S.moneyOut}>−{yenMan(Math.abs(m.expense))}</span>
+              <span style={{ ...S.moneyNet, color: m.net < 0 ? "#FF8A8A" : "#51CF66" }}>{yenMan(m.net)}</span>
+            </div>
+          ))}
+          {openCard === "money" && money && money.ytd && (
+            <div style={{ ...S.moneyRow, borderTop: `1px solid ${C.line}`, marginTop: 4, paddingTop: 8 }}>
+              <span style={{ ...S.moneyMonth, color: C.ink }}>年計</span>
+              <span style={S.moneyIn}>+{yenMan(money.ytd.income)}</span>
+              <span style={S.moneyOut}>−{yenMan(Math.abs(money.ytd.expense))}</span>
+              <span style={{ ...S.moneyNet, color: money.ytd.net < 0 ? "#FF8A8A" : "#51CF66" }}>{yenMan(money.ytd.net)}</span>
+            </div>
+          )}
           {openCard === "reply" && replyEntries.map(({ p, t }) => (
             <div key={t.id} style={S.replyItemWrap}>
               <div style={S.replyItem}>
@@ -6739,6 +6782,11 @@ const S = {
   replyItemCheck: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: 2 },
   replyItemLink: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.16)", padding: "6px 11px", borderRadius: 8, textDecoration: "none", flexShrink: 0, whiteSpace: "nowrap" },
 
+  moneyRow: { display: "flex", alignItems: "baseline", gap: 10, padding: "6px 2px" },
+  moneyMonth: { width: 42, flexShrink: 0, fontSize: 13.5, fontWeight: 800, color: C.ink2 },
+  moneyIn: { flex: 1, textAlign: "right", fontSize: 14, color: C.ink2, fontVariantNumeric: "tabular-nums" },
+  moneyOut: { flex: 1, textAlign: "right", fontSize: 14, color: C.ink3, fontVariantNumeric: "tabular-nums" },
+  moneyNet: { flex: 1, textAlign: "right", fontSize: 15, fontWeight: 800, fontVariantNumeric: "tabular-nums" },
   kpiRow: { display: "grid", gridTemplateColumns: "1fr", gap: 8 },
   kpiCard: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: "8px 12px", textAlign: "left", width: "100%" },
   kpiCardBtn: { cursor: "pointer" },
