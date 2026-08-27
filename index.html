@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28k"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1096,18 +1096,29 @@ export default function App() {
   }, []);
 
   /* ---- 下に引っ張って更新（ページ再読込なしで 同期＋Chatwork＋Gmail を取得） ---- */
+  const pullIntakeRef = useRef(null), pullMoneyRef = useRef(null); // 後方で定義される取得処理を引っ張り更新から呼ぶため
   const [ptr, setPtr] = useState(0);          // 引っ張り量(px表示用)
   const [ptrBusy, setPtrBusy] = useState(false);
   const ptrRef = useRef(0); const ptrBusyRef = useRef(false); const ptrStartY = useRef(null);
   // その場更新（同期→Chatwork→Gmail）。引っ張り更新とPCヘッダの↻ボタンで共用
+  // 直列に待つとGAS（特にGmail検索）が数秒〜十数秒かかり、その間ずっと待たされる。
+  // すべて同時に投げ、体感の速い同期だけ待って指を離せるようにする（残りは裏で続き、届き次第画面に反映される）
   const runRefresh = async () => {
     if (ptrBusyRef.current) return;
     ptrBusyRef.current = true; setPtrBusy(true);
     setHeld({ taskLane: {}, projRank: {} }); // 据え置きを解除して本来の並びに戻す
-    try { await cloudPull(null, { force: true }); } catch {}
-    try { if (cwPullRef.current) await cwPullRef.current(); } catch {}
-    try { if (gmailPullRef.current) await gmailPullRef.current(); } catch {}
-    setTimeout(() => { ptrBusyRef.current = false; setPtrBusy(false); }, 500);
+    const quiet = (p) => Promise.resolve(p).catch(() => {});
+    const sync = quiet(cloudPull(null, { force: true }));
+    const rest = [
+      quiet(cwPullRef.current && cwPullRef.current()),
+      quiet(gmailPullRef.current && gmailPullRef.current()),
+      quiet(pullIntakeRef.current && pullIntakeRef.current()),
+      quiet(pullMoneyRef.current && pullMoneyRef.current()),
+    ];
+    // 同期の完了か1.5秒のどちらか早い方で表示を戻す。取り込みは裏で走り続ける
+    await Promise.race([sync, new Promise((r) => setTimeout(r, 1500))]);
+    Promise.allSettled(rest);
+    ptrBusyRef.current = false; setPtrBusy(false);
   };
   useEffect(() => {
     const setP = (v) => { ptrRef.current = v; setPtr(v); };
@@ -1507,6 +1518,7 @@ export default function App() {
       setIntakes(Array.isArray(data) ? data : []);
     } catch (e) { /* テーブル未作成でも無視 */ }
   };
+  pullIntakeRef.current = pullIntake;
   useEffect(() => {
     pullIntake();
     const t = setInterval(pullIntake, 60000);
@@ -1759,6 +1771,7 @@ export default function App() {
       if (j && j.ok) setMoney(j);
     } catch (e) { /* オフライン時は前回値のまま */ }
   };
+  pullMoneyRef.current = pullMoney;
   useEffect(() => {
     pullMoney();
     const t = setInterval(pullMoney, 30 * 60 * 1000);
