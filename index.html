@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-27l"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -376,7 +376,7 @@ function normalizeProjects(arr) {
       status: STATUS_MIGRATE[p.status] || p.status || "進行中",
       start: p.start ?? "",
       msgs: cleanMsgs(Array.isArray(p.msgs) ? p.msgs : []),
-      tsq: p.tsq ? (p.tsq.items ? p.tsq : { srcId: p.tsq.srcId || "", items: p.tsq.title ? [{ title: p.tsq.title, note: p.tsq.note || "", due: p.tsq.due || "", urgent: !!p.tsq.urgent }] : [] }) : null, tsqSeen: p.tsqSeen ?? "", rsug: p.rsug ?? null, autoSt: p.autoSt ?? null, rneed: (p.rneed && p.rneed.need === false && p.rneed.v !== 2) ? null : (p.rneed ?? null), statusAt: p.statusAt ?? null,
+      tsq: p.tsq ? (p.tsq.items ? p.tsq : { srcId: p.tsq.srcId || "", items: p.tsq.title ? [{ title: p.tsq.title, note: p.tsq.note || "", due: p.tsq.due || "", urgent: !!p.tsq.urgent }] : [] }) : null, tsqSeen: p.tsqSeen ?? "", rsug: p.rsug ?? null, autoSt: p.autoSt ?? null, autoLink: p.autoLink ?? null, rneed: (p.rneed && p.rneed.need === false && p.rneed.v !== 2) ? null : (p.rneed ?? null), statusAt: p.statusAt ?? null,
       received: p.received ?? "", replyDraft: p.replyDraft ?? "", repliedAt: p.repliedAt ?? null, replyUrl: p.replyUrl ?? "", replyHistory: p.replyHistory ?? [], summary: p.summary ?? "",
       tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "", note: t.note ?? "", repeat: t.repeat ?? null, wip: t.wip ?? false, doneAt: t.doneAt ?? (t.done ? Date.now() : null), sugOff: t.sugOff ?? false, createdAt: t.createdAt ?? Date.now(), isAuto: t.isAuto ?? null, autoAt: t.autoAt ?? null, autoDone: t.autoDone ?? null })),
     };
@@ -1625,6 +1625,26 @@ export default function App() {
     });
     if (touched) persist(next);
   }, [projects]);
+  // プラットフォームの窓口リンク（Chatwork/CW/ランサーズ/Gmail）をやり取りから自動登録する
+  useEffect(() => {
+    const ps = projectsRef.current || [];
+    if (!ps.length) return;
+    let touched = false;
+    const next = ps.map((p) => {
+      if (p.id === INBOX_ID || p.status === "完了") return p;
+      const add = platformLinks(p).filter((l) => !hasLinkHost(p, l.url));
+      if (!add.length) return p;
+      touched = true;
+      return {
+        ...p,
+        links: [...(p.links || []), ...add.map((l) => ({ id: uid(), label: l.label, url: l.url }))],
+        autoLink: { labels: add.map((l) => l.label), at: Date.now() },
+      };
+    });
+    if (touched) persist(next);
+  }, [projects]);
+  const ackAutoLink = (pid) =>
+    persist((projectsRef.current || []).map((p) => p.id !== pid ? p : { ...p, autoLink: null }));
   // 自動完了を取り消す（以後このタスクでは提案しない）
   const undoAutoDone = (pid, tid) =>
     persist((projectsRef.current || []).map((p) => p.id !== pid ? p : {
@@ -1647,7 +1667,8 @@ export default function App() {
   // 自動追加の「NEW」印をまとめて消す
   const clearAutoMarks = () =>
     persist((projectsRef.current || []).map((p) => ({
-      ...p, tasks: (p.tasks || []).map((t) => (t.isAuto || t.autoDone) ? { ...t, isAuto: null, autoDone: null } : t),
+      ...p, autoLink: null,
+      tasks: (p.tasks || []).map((t) => (t.isAuto || t.autoDone) ? { ...t, isAuto: null, autoDone: null } : t),
     })));
   // ── freee収支（/api/freee）───────────────────────────────
   // サーバー側で30分キャッシュしているので、起動時と復帰時に取りにいくだけでよい
@@ -2481,10 +2502,13 @@ function ProjectsView({ projects, onOpen }) {
 // 今回メッセージから自動で追加・追記されたタスクのまとめ
 function AutoAddedCard({ projects, onClear }) {
   const rows = [];
-  (projects || []).forEach((p) => (p.tasks || []).forEach((t) => {
-    if (t.isAuto) rows.push({ p, t, kind: t.isAuto });
-    else if (t.autoDone) rows.push({ p, t, kind: "done" });
-  }));
+  (projects || []).forEach((p) => {
+    (p.tasks || []).forEach((t) => {
+      if (t.isAuto) rows.push({ p, t, kind: t.isAuto });
+      else if (t.autoDone) rows.push({ p, t, kind: "done" });
+    });
+    if (p.autoLink) rows.push({ p, t: { id: "L" + p.id, title: p.autoLink.labels.join("・") + " のリンクを登録", autoAt: p.autoLink.at }, kind: "link" });
+  });
   if (!rows.length) return null;
   rows.sort((a, b) => ((b.t.autoAt || (b.t.autoDone && b.t.autoDone.at) || 0) - (a.t.autoAt || (a.t.autoDone && a.t.autoDone.at) || 0)));
   return (
@@ -2496,7 +2520,7 @@ function AutoAddedCard({ projects, onClear }) {
       {rows.map(({ p, t, kind }) => (
         <div key={t.id} style={S.intakeItem}>
           <span style={{ ...S.intakeTag, ...(kind === "done" ? { color: "#8FBF9A", borderColor: "rgba(81,207,102,0.45)" } : {}) }}>
-            {kind === "append" ? "追記" : kind === "done" ? "完了" : "追加"}
+            {kind === "append" ? "追記" : kind === "done" ? "完了" : kind === "link" ? "リンク" : "追加"}
           </span>
           <div style={{ minWidth: 0 }}>
             <div style={S.intakeItemTitle}>{t.title}</div>
@@ -5726,6 +5750,52 @@ function linkClean(url) {
   } catch { return url; }
 }
 const LINK_WANTED = /(chatwork\.com|crowdworks\.jp|lancers\.jp|coconala\.com|claude\.ai|github\.com|vercel\.app|docs\.google\.com|drive\.google\.com)/;
+// やり取りログから「これしかない」と決まるリンク（プラットフォームの窓口）を組み立てる。
+// Docs等の候補と違い、ルームID・スレッドIDは一意なので確認なしで登録してよい
+function platformLinks(p) {
+  if (!p) return [];
+  const rids = [], cws = [], lcs = [], mails = [];
+  (p.msgs || []).forEach((m) => {
+    if (m.rid) rids.push(String(m.rid));
+    const pool = [m.curl || "", String(m.body || "")].join(" ");
+    (pool.match(/crowdworks\.jp\/messages\/(\d+)/g) || []).forEach((u) => cws.push(u.split("/").pop()));
+    (pool.match(/boardId=(\d+)/g) || []).forEach((u) => lcs.push(u.split("=").pop()));
+    (pool.match(/chatwork\.com\/#!rid(\d+)/g) || []).forEach((u) => rids.push(u.replace(/\D/g, "")));
+    // Gmail案件は相手のアドレスで検索リンクを作れる
+    if (m.src === "gmail" && m.who === "client") {
+      (pool.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) || []).forEach((a) => {
+        const x = a.toLowerCase();
+        // 通知専用アドレスやプラットフォームの配信元は窓口ではないので除く
+        if (/^(no-?reply|donotreply|info|support|contact|news|notice|admin|system|mail|help|service)@/.test(x)) return;
+        if (/(crowdworks|lancers|coconala|chatwork|affiliate|mail\.google|example)\./.test(x)) return;
+        mails.push(x);
+      });
+    }
+  });
+  const last = (a) => (a.length ? a[a.length - 1] : null);
+  const top = (a) => {
+    if (!a.length) return null;
+    const c = {}; a.forEach((x) => { c[x] = (c[x] || 0) + 1; });
+    return Object.keys(c).sort((x, y) => c[y] - c[x])[0];
+  };
+  const out = [];
+  if (rids.length) out.push({ label: "Chatwork", url: `https://www.chatwork.com/#!rid${last(rids)}` });
+  if (cws.length) out.push({ label: "CW", url: `https://crowdworks.jp/messages/${last(cws)}` });
+  if (lcs.length) out.push({ label: "ランサーズ", url: `https://www.lancers.jp/mypage/message?boardId=${last(lcs)}` });
+  // 2通以上やり取りしている相手だけを窓口とみなす
+  const mailTop = top(mails);
+  if (mailTop && mails.filter((x) => x === mailTop).length >= 2) {
+    out.push({ label: "Gmail", url: `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(mailTop)}` });
+  }
+  return out;
+}
+// すでに同じ窓口が登録済みかどうか（ホスト単位で見る）
+function hasLinkHost(p, url) {
+  let host = ""; try { host = new URL(url).hostname.replace(/^www\./, ""); } catch { return true; }
+  const all = [p.replyUrl || ""].concat((p.links || []).map((l) => l.url || ""));
+  return all.some((u) => { try { return new URL(u).hostname.replace(/^www\./, "") === host; } catch { return false; } });
+}
+
 function linkCandidates(p) {
   if (!p) return [];
   const have = new Set();
