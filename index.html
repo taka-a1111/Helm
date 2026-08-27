@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-27i"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-27j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -376,7 +376,7 @@ function normalizeProjects(arr) {
       status: STATUS_MIGRATE[p.status] || p.status || "進行中",
       start: p.start ?? "",
       msgs: cleanMsgs(Array.isArray(p.msgs) ? p.msgs : []),
-      tsq: p.tsq ? (p.tsq.items ? p.tsq : { srcId: p.tsq.srcId || "", items: p.tsq.title ? [{ title: p.tsq.title, note: p.tsq.note || "", due: p.tsq.due || "", urgent: !!p.tsq.urgent }] : [] }) : null, tsqSeen: p.tsqSeen ?? "", rsug: p.rsug ?? null, rneed: (p.rneed && p.rneed.need === false && p.rneed.v !== 2) ? null : (p.rneed ?? null), statusAt: p.statusAt ?? null,
+      tsq: p.tsq ? (p.tsq.items ? p.tsq : { srcId: p.tsq.srcId || "", items: p.tsq.title ? [{ title: p.tsq.title, note: p.tsq.note || "", due: p.tsq.due || "", urgent: !!p.tsq.urgent }] : [] }) : null, tsqSeen: p.tsqSeen ?? "", rsug: p.rsug ?? null, autoSt: p.autoSt ?? null, rneed: (p.rneed && p.rneed.need === false && p.rneed.v !== 2) ? null : (p.rneed ?? null), statusAt: p.statusAt ?? null,
       received: p.received ?? "", replyDraft: p.replyDraft ?? "", repliedAt: p.repliedAt ?? null, replyUrl: p.replyUrl ?? "", replyHistory: p.replyHistory ?? [], summary: p.summary ?? "",
       tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "", note: t.note ?? "", repeat: t.repeat ?? null, wip: t.wip ?? false, doneAt: t.doneAt ?? (t.done ? Date.now() : null), sugOff: t.sugOff ?? false, createdAt: t.createdAt ?? Date.now(), isAuto: t.isAuto ?? null, autoAt: t.autoAt ?? null })),
     };
@@ -1583,6 +1583,34 @@ export default function App() {
       return (tasks === p.tasks && tsq === p.tsq) ? p : { ...p, tasks, tsq };
     }));
   }, [projects]);
+  // ステータスの自動変更。提案のうち「進行中」「相手待ち」への切り替えだけを自動で適用する。
+  // 「完了」は取り返しがつきにくいので提案のまま残す。適用した分は autoSt に記録して戻せるようにする。
+  useEffect(() => {
+    const ps = projectsRef.current || [];
+    if (!ps.length) return;
+    const hits = ps.filter((p) => {
+      if (p.id === INBOX_ID || p.status === "完了") return false;
+      const sg = statusSuggestion(p);
+      return sg && sg.mark === "warn" && (sg.suggest === "進行中" || sg.suggest === "相手待ち") && sg.suggest !== p.status;
+    });
+    if (!hits.length) return;
+    const ids = new Set(hits.map((p) => p.id));
+    persist(ps.map((p) => {
+      if (!ids.has(p.id)) return p;
+      const sg = statusSuggestion(p);
+      return { ...p, status: sg.suggest, statusAt: new Date().toISOString(),
+        autoSt: { from: p.status, to: sg.suggest, reason: sg.reason, at: Date.now() } };
+    }));
+  }, [projects]);
+  // 自動変更を元に戻す（以後この件では提案しない）
+  const undoAutoStatus = (pid) =>
+    persist((projectsRef.current || []).map((p) => p.id !== pid || !p.autoSt ? p : {
+      ...p, status: p.autoSt.from, statusAt: new Date().toISOString(),
+      sugAckAt: new Date().toISOString(), autoSt: null,
+    }));
+  // 自動変更の印を消す（変更は残す）
+  const ackAutoStatus = (pid) =>
+    persist((projectsRef.current || []).map((p) => p.id !== pid ? p : { ...p, autoSt: null }));
   // 自動追加の「NEW」印をまとめて消す
   const clearAutoMarks = () =>
     persist((projectsRef.current || []).map((p) => ({
@@ -1828,7 +1856,7 @@ export default function App() {
                 <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />
               </div>
               {focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
-              {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} intakes={intakes} onApplyIntake={applyIntake} onDropIntake={closeIntake} onClearAuto={clearAutoMarks} money={money} heldRank={held.projRank} />}
+              {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onUndoAutoSt={undoAutoStatus} onAckAutoSt={ackAutoStatus} intakes={intakes} onApplyIntake={applyIntake} onDropIntake={closeIntake} onClearAuto={clearAutoMarks} money={money} heldRank={held.projRank} />}
               {focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             </div>
             <div style={S.triCol}>
@@ -1842,7 +1870,7 @@ export default function App() {
           <>
             {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
             {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
-            {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} intakes={intakes} onApplyIntake={applyIntake} onDropIntake={closeIntake} onClearAuto={clearAutoMarks} money={money} heldRank={held.projRank} />}
+            {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onUndoAutoSt={undoAutoStatus} onAckAutoSt={ackAutoStatus} intakes={intakes} onApplyIntake={applyIntake} onDropIntake={closeIntake} onClearAuto={clearAutoMarks} money={money} heldRank={held.projRank} />}
             {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
           </>
@@ -1929,7 +1957,7 @@ export default function App() {
 /* ============================================================
    フォーカス（ダッシュボード）
    ============================================================ */
-function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onWipTask, onToggleProject, onReorderTask, onMoveTask, onSetStatus, onOpenReply, onNoReply, onAckSug, onAckTaskSug, intakes, onApplyIntake, onDropIntake, onClearAuto, money, heldRank }) {
+function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onWipTask, onToggleProject, onReorderTask, onMoveTask, onSetStatus, onOpenReply, onNoReply, onAckSug, onAckTaskSug, onUndoAutoSt, onAckAutoSt, intakes, onApplyIntake, onDropIntake, onClearAuto, money, heldRank }) {
   const [openCard, setOpenCard] = useState(null);
   const [openMsg, setOpenMsg] = useState(null);
   const [addingTop, setAddingTop] = useState(false); // 右上「＋追加」（今日のタスクとして追加）
@@ -2141,6 +2169,23 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
               <span style={{ ...S.moneyNet, color: m.net < 0 ? "#FF8A8A" : "#51CF66" }}>{yenMan(m.net)}</span>
             </div>
           ))}
+          {openCard === "money" && money && (money.balances || []).length > 0 && (
+            <div style={S.balBox}>
+              <div style={S.balHead}>口座残高（freee同期時点）</div>
+              {money.balances.map((b) => (
+                <div key={b.name} style={S.balRow}>
+                  <span style={S.balName}>{b.name}</span>
+                  <span style={S.balVal}>{(b.balance || 0).toLocaleString()}円</span>
+                </div>
+              ))}
+              {money.balances.length > 1 && (
+                <div style={{ ...S.balRow, borderTop: `1px solid ${C.line}`, paddingTop: 6, marginTop: 2 }}>
+                  <span style={{ ...S.balName, color: C.ink, fontWeight: 800 }}>合計</span>
+                  <span style={{ ...S.balVal, color: C.ink, fontWeight: 800 }}>{(money.cash || 0).toLocaleString()}円</span>
+                </div>
+              )}
+            </div>
+          )}
           {openCard === "money" && money && money.ytd && (
             <div style={{ ...S.moneyRow, borderTop: `1px solid ${C.line}`, marginTop: 4, paddingTop: 8 }}>
               <span style={{ ...S.moneyMonth, color: C.ink }}>年計</span>
@@ -2288,7 +2333,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
                         <span>{g.label}</span>
                         <span style={{ ...S.focusGroupCount, color: g.color }}>{g.items.length}</span>
                       </div>
-                      {g.items.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onUpdateTask={onUpdateTask} onEditTask={onEditTask} onToggleTask={onToggleTask} onWipTask={onWipTask} onToggleProject={onToggleProject} onDragHandle={startDrag} dragging={dragId === p.id} dragActive={dragId !== null} onTaskDrag={startTaskDrag} taskDragId={dragTaskId} onSetStatus={onSetStatus} onOpenReply={onOpenReply} onNoReply={onNoReply} onArrow={arrowMove} onAckSug={onAckSug} onAckTaskSug={onAckTaskSug} onDateMenu={(e, pid, t) => setDateMenu({ x: e.clientX, y: e.clientY, pid, tid: t.id, cur: taskJudgeDate(t) || "" })} />)}
+                      {g.items.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onUpdateTask={onUpdateTask} onEditTask={onEditTask} onToggleTask={onToggleTask} onWipTask={onWipTask} onToggleProject={onToggleProject} onDragHandle={startDrag} dragging={dragId === p.id} dragActive={dragId !== null} onTaskDrag={startTaskDrag} taskDragId={dragTaskId} onSetStatus={onSetStatus} onOpenReply={onOpenReply} onNoReply={onNoReply} onArrow={arrowMove} onAckSug={onAckSug} onAckTaskSug={onAckTaskSug} onUndoAutoSt={onUndoAutoSt} onAckAutoSt={onAckAutoSt} onDateMenu={(e, pid, t) => setDateMenu({ x: e.clientX, y: e.clientY, pid, tid: t.id, cur: taskJudgeDate(t) || "" })} />)}
                     </div>
                   );
                 });
@@ -2462,7 +2507,7 @@ function IntakeCard({ row, onApply, onDrop }) {
     </div>
   );
 }
-function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onToggleTask, onWipTask, onToggleProject, onDragHandle, dragging, dragActive, onTaskDrag, taskDragId, onSetStatus, onOpenReply, onNoReply, onArrow, onAckSug, onAckTaskSug, onDateMenu }) {
+function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onToggleTask, onWipTask, onToggleProject, onDragHandle, dragging, dragActive, onTaskDrag, taskDragId, onSetStatus, onOpenReply, onNoReply, onArrow, onAckSug, onAckTaskSug, onUndoAutoSt, onAckAutoSt, onDateMenu }) {
   // ステータスの確信度（✓一致／?不明／⚠矛盾）と提案バー
   const sug = statusSuggestion(p);
   const [sugDismiss, setSugDismiss] = useState(false);
@@ -2576,6 +2621,14 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
           <Hourglass size={13} color={C.accent} strokeWidth={2.4} style={{ flexShrink: 0 }} />
           <span style={{ ...S.suggestText, color: C.accent }}>{sug.reason}</span>
           <button style={S.suggestX} title="対応済みにする（新着が来るまで再表示しない）" onClick={(e) => { stop(e); setSugDismiss(true); onAckSug && onAckSug(p.id); }}><X size={13} strokeWidth={2.2} /></button>
+        </div>
+      )}
+      {!dragActive && p.autoSt && (
+        <div style={S.autoStBar} onPointerDown={stop} onClick={stop}>
+          <Repeat size={13} strokeWidth={2.4} style={{ flexShrink: 0 }} />
+          <span style={S.autoStText}>「{p.autoSt.to}」に自動変更 — {p.autoSt.reason}</span>
+          <button style={S.autoStUndo} onClick={(e) => { stop(e); onUndoAutoSt && onUndoAutoSt(p.id); }}>戻す</button>
+          <button style={S.suggestX} onClick={(e) => { stop(e); onAckAutoSt && onAckAutoSt(p.id); }}><X size={13} strokeWidth={2.2} /></button>
         </div>
       )}
       {!dragActive && sug && sug.mark === "warn" && sug.suggest && !sugDismiss && (
@@ -6790,6 +6843,14 @@ const S = {
   replyItemCheck: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: 2 },
   replyItemLink: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, fontWeight: 700, color: "#6B8AFF", background: "rgba(107,138,255,0.16)", padding: "6px 11px", borderRadius: 8, textDecoration: "none", flexShrink: 0, whiteSpace: "nowrap" },
 
+  balBox: { display: "grid", gap: 5, padding: "8px 2px 2px" },
+  balHead: { fontSize: 12, fontWeight: 700, color: C.ink3, marginBottom: 2 },
+  balRow: { display: "flex", alignItems: "baseline", gap: 10 },
+  balName: { flex: 1, minWidth: 0, fontSize: 13.5, color: C.ink2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  balVal: { fontSize: 14, color: C.ink2, fontWeight: 700, fontVariantNumeric: "tabular-nums" },
+  autoStBar: { display: "flex", alignItems: "center", gap: 7, marginTop: 8, padding: "7px 10px", borderRadius: 9, background: "rgba(107,138,255,0.10)", border: "1px solid rgba(107,138,255,0.35)", color: C.accent },
+  autoStText: { flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 700, lineHeight: 1.4 },
+  autoStUndo: { border: `1px solid ${C.accent}`, borderRadius: 7, background: "transparent", color: C.accent, fontSize: 12, fontWeight: 800, padding: "4px 9px", cursor: "pointer", whiteSpace: "nowrap" },
   pendingBar: { display: "flex", alignItems: "center", gap: 7, marginTop: 8, padding: "9px 11px", borderRadius: 10, border: "1px solid rgba(217,162,59,0.45)", background: "rgba(217,162,59,0.10)", color: "#D9A23B", fontSize: 13, fontWeight: 700, textDecoration: "none", lineHeight: 1.4 },
   moneyRow: { display: "flex", alignItems: "baseline", gap: 10, padding: "6px 2px" },
   moneyMonth: { width: 42, flexShrink: 0, fontSize: 13.5, fontWeight: 800, color: C.ink2 },
