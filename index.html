@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28h"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28i"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -5130,6 +5130,15 @@ function SettingsModal({ onClose, sync, syncState, onSaveSync, onSyncPush, onSyn
         </div>
         <div style={S.modalBody}>
           <div style={S.settingNote}>
+            この端末のHelmの版数：<b style={{ color: C.ink }}>{BUILD_TAG}</b>
+          </div>
+          <button style={S.syncSubBtn} onClick={async () => {
+            try { if (navigator.serviceWorker) { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map((r) => r.unregister())); } } catch (e) {}
+            try { if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.filter((k) => k !== "helm-share").map((k) => caches.delete(k))); } } catch (e) {}
+            window.location.replace(window.location.pathname + "?v=" + Date.now());
+          }}>最新版に強制更新</button>
+          <div style={S.settingDivider} />
+          <div style={S.settingNote}>
             返信案の生成・タスク抽出に使います。ブラウザでこのHTMLを直接開いた場合は、ご自身のAnthropic APIキーが必要です（Claudeアプリ内のプレビューでは未入力でも動作します）。
           </div>
           <Field label="Anthropic APIキー">
@@ -7654,9 +7663,9 @@ const S = {
   pendingApply: { display: "inline-flex", alignItems: "center", gap: 5, border: "none", background: C.accent, color: "#fff", borderRadius: 9, padding: "9px 14px", fontSize: 14.5, fontWeight: 700 },
 
   /* settings modal */
-  modal: { position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", zIndex: 50, width: "min(440px, 92vw)", background: C.bg, borderRadius: 16, boxShadow: "0 24px 60px rgba(20,24,40,0.3)", overflow: "hidden" },
-  modalHead: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "15px 18px", borderBottom: `1px solid ${C.line}`, background: C.panel },
-  modalBody: { padding: 18, display: "flex", flexDirection: "column", gap: 13 },
+  modal: { position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", zIndex: 50, width: "min(440px, 92vw)", maxHeight: "88vh", display: "flex", flexDirection: "column", background: C.bg, borderRadius: 16, boxShadow: "0 24px 60px rgba(20,24,40,0.3)", overflow: "hidden" },
+  modalHead: { flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "15px 18px", borderBottom: `1px solid ${C.line}`, background: C.panel },
+  modalBody: { flex: 1, minHeight: 0, overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", padding: 18, paddingBottom: "calc(18px + env(safe-area-inset-bottom))", display: "flex", flexDirection: "column", gap: 13 },
   sharePreview: { display: "flex", flexDirection: "column", gap: 7, padding: "10px 12px", background: C.panel, borderRadius: 10, border: `1px solid ${C.line}` },
   sharePreviewRow: { display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: C.ink2, minWidth: 0 },
   sharePreviewText: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
