@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28k"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28l"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1096,6 +1096,9 @@ export default function App() {
   }, []);
 
   /* ---- 下に引っ張って更新（ページ再読込なしで 同期＋Chatwork＋Gmail を取得） ---- */
+  // GASは1日の実行時間に上限がある。短時間に何度も引っ張っても取り込みは呼ばない
+  const gasLastRef = useRef(0);
+  const GAS_COOLDOWN = 30 * 1000;
   const pullIntakeRef = useRef(null), pullMoneyRef = useRef(null); // 後方で定義される取得処理を引っ張り更新から呼ぶため
   const [ptr, setPtr] = useState(0);          // 引っ張り量(px表示用)
   const [ptrBusy, setPtrBusy] = useState(false);
@@ -1109,9 +1112,12 @@ export default function App() {
     setHeld({ taskLane: {}, projRank: {} }); // 据え置きを解除して本来の並びに戻す
     const quiet = (p) => Promise.resolve(p).catch(() => {});
     const sync = quiet(cloudPull(null, { force: true }));
+    const now = Date.now();
+    const useGas = now - gasLastRef.current > GAS_COOLDOWN;
+    if (useGas) gasLastRef.current = now;
     const rest = [
-      quiet(cwPullRef.current && cwPullRef.current()),
-      quiet(gmailPullRef.current && gmailPullRef.current()),
+      quiet(useGas && cwPullRef.current && cwPullRef.current()),
+      quiet(useGas && gmailPullRef.current && gmailPullRef.current()),
       quiet(pullIntakeRef.current && pullIntakeRef.current()),
       quiet(pullMoneyRef.current && pullMoneyRef.current()),
     ];
