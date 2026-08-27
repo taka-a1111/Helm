@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -2246,7 +2246,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
         <IntakeCard key={row.id} row={row} onApply={onApplyIntake} onDrop={onDropIntake} />
       ))}
       {(orphans || []).map((o) => (
-        <OrphanCard key={o.key} o={o} projects={(allProjects || projects).filter((p) => p.id !== INBOX_ID && p.status !== "完了")}
+        <OrphanCard key={o.key} o={o} projects={(allProjects || projects).filter((p) => p.id !== INBOX_ID)}
           onAssign={onAssignOrphan} onNew={onNewOrphan} onIgnore={onIgnoreOrphan} />
       ))}
       <AutoAddedCard projects={allProjects || projects} onClear={onClearAuto} />
@@ -6528,11 +6528,24 @@ function orphanOf(mail) {
     if (!u) return null;
     return { key: "lc:" + u.split("=").pop(), kind: "ランサーズ", name, at, subject, url: u, count: 1 };
   }
-  // Gmail：通知・配信系は対象外。個人とのやり取りだけ拾う
-  const hay = `${mail.from || ""} ${mail.fromName || ""} ${subject}`;
-  if (/no-?reply|noreply|newsletter|magazine|mailmag|info@|news@|support@|配信停止|メールマガジン/i.test(hay)) return null;
+  // Gmail：ここが一番ノイズが多い。通知・配信・システムメールを落とし、
+  // 「人が人に宛てて書いた仕事のメール」だけを未割当として拾う
   const addr = String(mail.from || "").toLowerCase();
   if (!addr || mail.dir === "out") return null;
+  // 役割アドレス（送信専用・自動送信）は相手ではない
+  if (/^(no-?reply|noreply|donotreply|do-not-reply|info|support|contact|news|notice|notify|announce|admin|system|mail|mailer|help|service|order|orders|order-update|shipment|shipment-tracking|billing|invoice|payment|account|accounts|alert|alerts|notification|notifications|wordpress|webmaster|marketing|press|magazine|newsletter|special|campaign|cs|customer|reply|auto|robot|bot|daemon|postmaster|delivery|track|tracking|member|members|entry|regist|register|survey|event|seminar|jobalert|recruit)[-.@]/i.test(addr)) return null;
+  // 自分（や自分のサイト）からのメールは相手ではない
+  if (/mfa23|infosuccess|believe\.myself/i.test(addr)) return null;
+  const body = raw;
+  const hay = `${addr} ${mail.fromName || ""} ${subject} ${body.slice(0, 800)}`;
+  if (/配信停止|購読を解除|メールマガジン|newsletter|unsubscribe|自動配信|自動送信|このメールは送信専用|返信できません|no-?reply/i.test(hay)) return null;
+  // 宛名（〜様／〜さん）と、仕事の話であることを示す語の両方が要る
+  const addressed = /(様|さん)[\s\u3000、,]|^.{0,20}(様|さん)$/m.test(body.slice(0, 400));
+  const businesslike = /(お世話になって|はじめまして|初めまして|ご相談|ご依頼|お見積|見積|お仕事|案件|発注|納品|打ち合わせ|打合せ|ご確認いただ|ご連絡いたしました|よろしくお願い)/.test(body.slice(0, 1200));
+  if (!addressed || !businesslike) return null;
+  // エージェントの案件紹介・営業メールは「やり取り中の相手」ではない
+  if (/support|jimukyoku|agent|scout|sales|recruit/i.test(addr.split("@")[0])) return null;
+  if (/(サポート事務局|運営事務局|カスタマーサポート|お声がけ差し上げ|案件のご紹介|ご紹介したい案件|急募|エージェント|稼働可能|ご登録いただ|案件情報|フォームから回答)/.test(hay)) return null;
   return { key: "gm:" + addr, kind: "Gmail", name: name || addr, at, subject, url: "", count: 1 };
 }
 
@@ -6556,6 +6569,15 @@ function matchMailToProject(mail, projects) {
     let score = 0;
     // スレッドID一致＝確定（CW／ランサーズは相手の表示名が案件名と一致しないのが普通）
     if (mailTh.size) { const pt = projThreadKeys(p); for (const k of mailTh) { if (pt.has(k)) score = 5; } }
+    // 英数・カタカナの「核」が案件名に含まれていれば同一相手とみなす（表記ゆれ対策）
+    if (score < 5) {
+      for (const k of keys) {
+        const core = (k.match(/[a-z0-9]{4,}|[ァ-ヴー]{3,}/g) || []);
+        for (const c of core) {
+          if (c.length >= 4 && norm(p.company).indexOf(c) >= 0) { score = Math.max(score, 3); }
+        }
+      }
+    }
     for (const raw of names) {
       const n = norm(peelName(raw));
       if (n.length < 2 || GENERIC_NAME.test(n)) continue;
