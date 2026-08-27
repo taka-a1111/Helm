@@ -1,69 +1,48 @@
 // api/freee.js — Helm用 freee収支API（Vercel Serverless Function）
 //
-// GASを使わず、Helmと同じVercelプロジェクト内で完結させる版。
-// 参照専用（freeeへの書き込みは一切しない）。
+// freeeの「取引」から月ごとの 収入 / 支出 / 差引 を集計して返す。参照専用。
+// refresh_token は1回使うと差し替わるため、更新後の値をSupabase（helm_kv）へ保存する。
 //
-// ■ セットアップ
-//  1) このファイルを GitHub の taka-a1111/Helm に api/freee.js として置く
-//  2) Vercel → プロジェクト → Settings → Environment Variables に登録
-//       FREEE_CLIENT_ID
-//       FREEE_CLIENT_SECRET
-//       FREEE_REFRESH_TOKEN
-//       FREEE_COMPANY_ID      80198
-//       HELM_TOKEN            helm-cw-9k4w
-//       KV_REST_API_URL       （Vercel KV を接続すると自動で入る）
-//       KV_REST_API_TOKEN     （同上）
-//  3) 再デプロイ
-//
-// ■ 使い方
-//   GET /api/freee?t=helm-cw-9k4w            … 今年の月次
-//   GET /api/freee?t=helm-cw-9k4w&year=2025  … 年を指定
-//
-// ■ refresh_token のローテーションについて
-//   freeeは refresh_token を1回使うと新しいものに差し替える。
-//   Vercelの環境変数は実行中に書き換えられないため、更新後のトークンは
-//   Vercel KV に保存して次回以降そちらを優先して使う。
-//   KVを繋がない場合も動くが、環境変数のトークンが失効した時点で
-//   認可からやり直しになるので、KVの接続を推奨。
+// 必要な環境変数
+//   FREEE_CLIENT_ID / FREEE_CLIENT_SECRET / FREEE_COMPANY_ID
+//   FREEE_REFRESH_TOKEN … 初回のみ使う種。以降はSupabase側が正。
+//   HELM_TOKEN          … このAPIを叩くための合言葉
+//   SUPABASE_URL / SUPABASE_KEY / SUPABASE_KV_TOKEN
 
 const TOKEN_URL = "https://accounts.secure.freee.co.jp/public_api/token";
 const API = "https://api.freee.co.jp/api/1";
 const KV_KEY = "freee:refresh_token";
 
-async function kvGet() {
-  const url = process.env.KV_REST_API_URL, tok = process.env.KV_REST_API_TOKEN;
-  if (!url || !tok) return null;
-  try {
-    const r = await fetch(`${url}/get/${KV_KEY}`, { headers: { Authorization: `Bearer ${tok}` } });
-    const j = await r.json();
-    return j && j.result ? j.result : null;
-  } catch { return null; }
+async function rpc(fn, body) {
+  const r = await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: {
+      apikey: process.env.SUPABASE_KEY,
+      Authorization: `Bearer ${process.env.SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ ...body, tok: process.env.SUPABASE_KV_TOKEN }),
+  });
+  if (!r.ok) throw new Error(`kv ${fn}: ${r.status} ${await r.text()}`);
+  const t = await r.text();
+  return t ? JSON.parse(t) : null;
 }
 
-async function kvSet(value) {
-  const url = process.env.KV_REST_API_URL, tok = process.env.KV_REST_API_TOKEN;
-  if (!url || !tok) return;
-  try {
-    await fetch(`${url}/set/${KV_KEY}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" },
-      body: JSON.stringify(value),
-    });
-  } catch {}
-}
+const kvGet = async () => { try { return await rpc("helm_kv_get", { k: KV_KEY }); } catch { return null; } };
+const kvSet = async (v) => { try { await rpc("helm_kv_set", { k: KV_KEY, v }); } catch {} };
 
 async function accessToken() {
-  const refresh = (await kvGet()) || process.env.FREEE_REFRESH_TOKEN;
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    client_id: process.env.FREEE_CLIENT_ID,
-    client_secret: process.env.FREEE_CLIENT_SECRET,
-    refresh_token: refresh,
-  });
+  const stored = await kvGet();
+  const refresh = stored || process.env.FREEE_REFRESH_TOKEN;
   const r = await fetch(TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: process.env.FREEE_CLIENT_ID,
+      client_secret: process.env.FREEE_CLIENT_SECRET,
+      refresh_token: refresh,
+    }),
   });
   const j = await r.json();
   if (!j.access_token) throw new Error("token: " + JSON.stringify(j));
@@ -99,8 +78,8 @@ export default async function handler(req, res) {
     if ((req.query.t || "") !== process.env.HELM_TOKEN) {
       return res.status(401).json({ ok: false, error: "bad token" });
     }
-    const nowJst = new Date(Date.now() + 9 * 3600 * 1000);
-    const year = Number(req.query.year) || nowJst.getUTCFullYear();
+    const jst = new Date(Date.now() + 9 * 3600 * 1000);
+    const year = Number(req.query.year) || jst.getUTCFullYear();
     const token = await accessToken();
     const [inc, exp] = await Promise.all([
       fetchDeals(token, "income", `${year}-01-01`, `${year}-12-31`),
@@ -113,7 +92,7 @@ export default async function handler(req, res) {
       const a = I[k] || 0, b = E[k] || 0;
       if (a || b) months.push({ month: k, income: a, expense: b, net: a - b });
     }
-    const cur = `${year}-${String(nowJst.getUTCMonth() + 1).padStart(2, "0")}`;
+    const cur = `${year}-${String(jst.getUTCMonth() + 1).padStart(2, "0")}`;
     const current = months.find((m) => m.month === cur) || { month: cur, income: 0, expense: 0, net: 0 };
     const ytd = months.reduce((s, m) => ({
       income: s.income + m.income, expense: s.expense + m.expense, net: s.net + m.net,
