@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1541,7 +1541,17 @@ export default function App() {
         }
       });
       const memo = String(pl.note || "").trim();
-      return { ...p, tasks, note: memo ? ((p.note ? p.note + "\n" : "") + memo) : p.note };
+      // links: Claudeプロジェクト側から「このプロジェクトのURLを登録して」と送れる
+      const addLinks = (pl.links || [])
+        .filter((l) => l && /^https?:\/\//.test(l.url || ""))
+        .filter((l) => !((p.links || []).some((x) => (x.url || "") === l.url)) && (p.replyUrl || "") !== l.url)
+        .map((l) => ({ id: uid(), label: String(l.label || "").slice(0, 20), url: l.url }));
+      return {
+        ...p, tasks,
+        links: addLinks.length ? [...(p.links || []), ...addLinks] : p.links,
+        autoLink: addLinks.length ? { labels: addLinks.map((l) => l.label || "リンク"), at: Date.now() } : p.autoLink,
+        note: memo ? ((p.note ? p.note + "\n" : "") + memo) : p.note,
+      };
     }));
     closeIntake(row.id);
   };
@@ -2559,6 +2569,15 @@ function IntakeCard({ row, onApply, onDrop }) {
         <div key={"d" + i} style={S.intakeItem}>
           <span style={{ ...S.intakeTag, color: "#8FBF9A", borderColor: "rgba(81,207,102,0.4)" }}>完了</span>
           <div style={S.intakeItemTitle}>{t}</div>
+        </div>
+      ))}
+      {(pl.links || []).map((l, i) => (
+        <div key={"l" + i} style={S.intakeItem}>
+          <span style={S.intakeTag}>リンク</span>
+          <div style={{ minWidth: 0 }}>
+            <div style={S.intakeItemTitle}>{l.label || "リンク"}</div>
+            <div style={S.intakeItemNote}>{l.url}</div>
+          </div>
         </div>
       ))}
       {pl.note && <div style={S.intakeItemNote}>メモ：{pl.note}</div>}
@@ -6592,6 +6611,43 @@ function MarqueeText({ text, style, gap = 40, seconds = 10 }) {
 }
 
 // 案件詳細のリンク編集フィールド（Claude / GitHub / 公開URL などをワンタップ追加）
+// クリップボードにURLがあれば、ワンタップで登録できるようにする。
+// Claudeのプロジェクトはやり取りに出てこないため推測できず、これが一番速い登録方法になる
+function ClipboardLinkChip({ onAdd, have }) {
+  const [found, setFound] = useState(null);
+  const [note, setNote] = useState("");
+  const read = async () => {
+    try {
+      const t = await navigator.clipboard.readText();
+      const u = (String(t || "").match(/https?:\/\/[^\s"'<>]+/) || [])[0];
+      if (!u) { setNote("クリップボードにURLがありません"); return; }
+      if ((have || []).indexOf(u) >= 0) { setNote("すでに登録済みです"); return; }
+      setNote(""); setFound(u);
+    } catch (e) { setNote("クリップボードを読めませんでした。下の欄に貼り付けてください"); }
+  };
+  if (found) {
+    const label = urlAutoLabel(found);
+    return (
+      <div style={S.clipBox}>
+        <div style={S.clipUrl}>{found}</div>
+        <div style={S.candRow}>
+          <button style={S.clipAdd} onClick={() => { onAdd(found, label); setFound(null); }}>
+            <Plus size={13} strokeWidth={2.8} />{label} として登録
+          </button>
+          <button style={S.clipCancel} onClick={() => setFound(null)}>やめる</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={S.candRow}>
+      <button style={S.candChip} onClick={read}>
+        <Copy size={13} strokeWidth={2.4} />クリップボードから登録
+      </button>
+      {note && <span style={S.clipNote}>{note}</span>}
+    </div>
+  );
+}
 function LinksField({ links, candidates, onChange }) {
   const list = Array.isArray(links) ? links : [];
   const [editId, setEditId] = useState(null);
@@ -6689,6 +6745,8 @@ function LinksField({ links, candidates, onChange }) {
           </div>
         );
       })}
+      <ClipboardLinkChip onAdd={(url, label) => onChangeRef.current([...listRef.current, { id: uid(), label, url }])}
+        have={(listRef.current || []).map((l) => l.url || "")} />
       {(candidates || []).length > 0 && (() => {
         const known = new Set(listRef.current.map((l) => linkKey(l.url || "")));
         const fresh = (candidates || []).filter((c) => !known.has(linkKey(c.url)));
@@ -7567,6 +7625,11 @@ const S = {
   linkUrlInput: { flex: 1, minWidth: 120, background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 9px", fontSize: 14, color: C.ink },
   linkOpenMini: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 8, color: C.accent, background: "rgba(107,138,255,0.14)", textDecoration: "none" },
   linkDelMini: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 8, border: "none", background: "transparent", color: C.ink3 },
+  clipBox: { display: "grid", gap: 6, padding: 9, borderRadius: 9, border: `1px solid ${C.accent}`, background: "rgba(107,138,255,0.08)" },
+  clipUrl: { fontSize: 12, color: C.ink2, wordBreak: "break-all", lineHeight: 1.45 },
+  clipAdd: { display: "inline-flex", alignItems: "center", gap: 4, border: "none", borderRadius: 8, background: C.accent, color: "#0F1318", fontSize: 13, fontWeight: 800, padding: "7px 12px", cursor: "pointer" },
+  clipCancel: { border: `1px solid ${C.line}`, borderRadius: 8, background: "transparent", color: C.ink3, fontSize: 13, fontWeight: 700, padding: "7px 12px", cursor: "pointer" },
+  clipNote: { fontSize: 12, color: C.ink3, alignSelf: "center" },
   candWrap: { display: "grid", gap: 6, marginTop: 4 },
   candHead: { display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 700, color: C.ink3 },
   candMore: { marginLeft: "auto", border: "none", background: "transparent", color: C.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 },
