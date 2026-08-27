@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28g"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28h"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1766,6 +1766,33 @@ export default function App() {
     document.addEventListener("visibilitychange", onWake);
     return () => { clearInterval(t); document.removeEventListener("visibilitychange", onWake); };
   }, []);
+  // ── 新しい版の自動検知 ───────────────────────────────
+  // デプロイしても古い版を見続ける事故を防ぐ。復帰時と3分ごとにBUILD_TAGを見に行く
+  const [newBuild, setNewBuild] = useState("");
+  useEffect(() => {
+    let stopped = false;
+    const check = async () => {
+      if (stopped || document.hidden) return;
+      try {
+        const r = await fetch("/index.html?v=" + Date.now(), { cache: "no-store" });
+        const t = await r.text();
+        const m = t.match(/BUILD_TAG\s*=\s*"([^"]+)"/);
+        if (m && m[1] && m[1] !== BUILD_TAG) setNewBuild(m[1]);
+      } catch (e) { /* 通信できないときは何もしない */ }
+    };
+    const t0 = setTimeout(check, 5000);
+    const iv = setInterval(check, 3 * 60 * 1000);
+    const onWake = () => { if (!document.hidden) check(); };
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("focus", onWake);
+    return () => { stopped = true; clearTimeout(t0); clearInterval(iv);
+      document.removeEventListener("visibilitychange", onWake); window.removeEventListener("focus", onWake); };
+  }, []);
+  const applyNewBuild = async () => {
+    try { if (navigator.serviceWorker) { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map((r) => r.unregister())); } } catch (e) {}
+    try { if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.filter((k) => k !== "helm-share").map((k) => caches.delete(k))); } } catch (e) {}
+    window.location.replace(window.location.pathname + "?v=" + Date.now());
+  };
   const markSent = (pid, text) => {
     const now = new Date();
     const at = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
@@ -2014,6 +2041,13 @@ export default function App() {
       {showSearch && <SearchModal projects={projects} recentIds={recentIds}
         onPick={(p) => { setShowSearch(false); setEditing(p); pushRecent(p.id); }}
         onClose={goBack} />}
+      {newBuild && !editing && !editTask && (
+        <div style={S.updBar} onClick={applyNewBuild}>
+          <Download size={14} strokeWidth={2.6} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1, minWidth: 0 }}>新しい版 {newBuild} があります</span>
+          <span style={S.updBtn}>今すぐ更新</span>
+        </div>
+      )}
       {showSettings && <SettingsModal onClose={goBack} onResetOrphanSkip={resetOrphanSkip} orphanSkipCount={orphanSkipCount}
         sync={sync} syncState={syncState} onSaveSync={saveSync} onSyncPush={syncPush} onSyncPull={syncPull} onDiagnose={syncDiagnose} />}
 
@@ -7242,6 +7276,8 @@ const S = {
   autoStBar: { display: "flex", alignItems: "center", gap: 7, marginTop: 8, padding: "7px 10px", borderRadius: 9, background: "rgba(107,138,255,0.10)", border: "1px solid rgba(107,138,255,0.35)", color: C.accent },
   autoStText: { flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 700, lineHeight: 1.4 },
   autoStUndo: { border: `1px solid ${C.accent}`, borderRadius: 7, background: "transparent", color: C.accent, fontSize: 12, fontWeight: 800, padding: "4px 9px", cursor: "pointer", whiteSpace: "nowrap" },
+  updBar: { position: "fixed", left: 12, right: 12, bottom: 12, zIndex: 60, display: "flex", alignItems: "center", gap: 8, padding: "11px 13px", borderRadius: 11, background: C.accent, color: "#0F1318", fontSize: 13.5, fontWeight: 800, boxShadow: "0 6px 20px rgba(0,0,0,0.45)", cursor: "pointer" },
+  updBtn: { flexShrink: 0, background: "rgba(15,19,24,0.16)", borderRadius: 7, padding: "4px 9px", fontSize: 12.5, fontWeight: 800 },
   pendingBar: { display: "flex", alignItems: "center", gap: 7, marginTop: 8, padding: "9px 11px", borderRadius: 10, border: "1px solid rgba(217,162,59,0.45)", background: "rgba(217,162,59,0.10)", color: "#D9A23B", fontSize: 13, fontWeight: 700, textDecoration: "none", lineHeight: 1.4 },
   moneyRow: { display: "flex", alignItems: "baseline", gap: 10, padding: "6px 2px" },
   moneyMonth: { width: 42, flexShrink: 0, fontSize: 13.5, fontWeight: 800, color: C.ink2 },
