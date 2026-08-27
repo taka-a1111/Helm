@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-27c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-27d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1549,11 +1549,36 @@ export default function App() {
     if (sweptRef.current) return;
     const ps = projectsRef.current || [];
     if (!ps.length) return;
-    const need = ps.some((p) => p.status === "完了" && (p.tasks || []).some((t) => !t.done && !t.repeat));
+    const needSweep = ps.some((p) => p.status === "完了" && (p.tasks || []).some((t) => !t.done && !t.repeat));
+    // 旧版の「確認待ち」に残っている候補は、取り込み済み扱いで二度と解析されないので、ここで自動反映して移行する
+    const needFlush = ps.some((p) => p.tsq && (p.tsq.items || []).length);
     sweptRef.current = true;
-    if (!need) return;
-    persist(ps.map((p) => p.status !== "完了" ? p : {
-      ...p, tasks: (p.tasks || []).map((t) => (t.done || t.repeat) ? t : { ...t, done: true, doneAt: Date.now() }),
+    if (!needSweep && !needFlush) return;
+    const now = Date.now();
+    persist(ps.map((p) => {
+      let tasks = p.tasks || [];
+      if (p.status === "完了") tasks = tasks.map((t) => (t.done || t.repeat) ? t : { ...t, done: true, doneAt: now });
+      let tsq = p.tsq;
+      if (tsq && (tsq.items || []).length) {
+        (tsq.items || []).forEach((it) => {
+          if (!it || !it.title) return;
+          if (it.append) {
+            const tk = tasks.find((t) => t.id === it.tid && !t.done);
+            if (tk) tasks = tasks.map((t) => t.id !== tk.id ? t : {
+              ...t, note: (t.note ? t.note + "\n" : "") + (it.note || ""),
+              start: t.start || dStr(0), sugOff: false, isAuto: "append", autoAt: now });
+            return;
+          }
+          if (isDupTaskTitle(it.title, tasks)) return;
+          tasks = [...tasks, { id: uid(), title: String(it.title).slice(0, 60), done: false,
+            note: String(it.note || ""), due: /^\d{4}-\d{2}-\d{2}$/.test(it.due || "") ? it.due : "",
+            start: it.urgent ? dStr(0) : (new Date().getHours() < 17 ? dStr(0) : dStr(1)),
+            lane: "today", kind: "task", repeat: null, links: [], wip: false, doneAt: null,
+            sugOff: false, createdAt: now, isAuto: "new", autoAt: now }];
+        });
+        tsq = null;
+      }
+      return (tasks === p.tasks && tsq === p.tsq) ? p : { ...p, tasks, tsq };
     }));
   }, [projects]);
   // 自動追加の「NEW」印をまとめて消す
