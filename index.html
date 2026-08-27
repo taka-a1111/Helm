@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-27a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-27b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -245,7 +245,7 @@ const repeatLabelJP = (r) => {
 };
 // 返信タスク（当日期限）。msg はクライアントから届いた原文をそのまま保持
 const reply = (title, msg = "") => ({ id: uid(), title, done: false, due: dStr(0), lane: "today", kind: "reply", msg, note: "", repeat: null, links: [] });
-const task = (title, offset, lane = "today", done = false) => ({ id: uid(), title, done, due: offset == null ? "" : dStr(offset), start: "", lane, kind: "task", note: "", repeat: null, links: [] });
+const task = (title, offset, lane = "today", done = false) => ({ id: uid(), title, done, due: offset == null ? "" : dStr(offset), start: "", lane, kind: "task", note: "", repeat: null, links: [], createdAt: Date.now() });
 
 function makeSample() {
   // 本番初期データ。Gmail（クラウドワークス通知）から確認できた進行中案件のみ骨組みで登録。
@@ -376,7 +376,7 @@ function normalizeProjects(arr) {
       msgs: cleanMsgs(Array.isArray(p.msgs) ? p.msgs : []),
       tsq: p.tsq ? (p.tsq.items ? p.tsq : { srcId: p.tsq.srcId || "", items: p.tsq.title ? [{ title: p.tsq.title, note: p.tsq.note || "", due: p.tsq.due || "", urgent: !!p.tsq.urgent }] : [] }) : null, tsqSeen: p.tsqSeen ?? "", rsug: p.rsug ?? null, rneed: (p.rneed && p.rneed.need === false && p.rneed.v !== 2) ? null : (p.rneed ?? null), statusAt: p.statusAt ?? null,
       received: p.received ?? "", replyDraft: p.replyDraft ?? "", repliedAt: p.repliedAt ?? null, replyUrl: p.replyUrl ?? "", replyHistory: p.replyHistory ?? [], summary: p.summary ?? "",
-      tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "", note: t.note ?? "", repeat: t.repeat ?? null, wip: t.wip ?? false, doneAt: t.doneAt ?? (t.done ? Date.now() : null), sugOff: t.sugOff ?? false })),
+      tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "", note: t.note ?? "", repeat: t.repeat ?? null, wip: t.wip ?? false, doneAt: t.doneAt ?? (t.done ? Date.now() : null), sugOff: t.sugOff ?? false, createdAt: t.createdAt ?? Date.now() })),
     };
     // ★リンク一元化：案件links＋返信先URL＋全タスクlinks を案件へ寄せ、重複URLは1本化。返信先は kind:reply。タスクからlinksは除去。
     const merged = []; const seen = new Set();
@@ -1395,7 +1395,12 @@ export default function App() {
   const toggleProjectDone = (pid) =>
     persist(projects.map((p) => p.id !== pid ? p : { ...p, status: p.status === "完了" ? "進行中" : "完了" }));
   const setProjectStatus = (pid, status) =>
-    persist(projects.map((p) => p.id !== pid ? p : { ...p, status, statusAt: new Date().toISOString() }));
+    persist(projects.map((p) => p.id !== pid ? p : {
+      ...p, status, statusAt: new Date().toISOString(),
+      // 「完了」にしたら、残っている作業タスクもその場で閉じる（繰り返しタスクは残す）
+      tasks: status !== "完了" ? p.tasks
+        : (p.tasks || []).map((t) => (t.done || t.repeat) ? t : { ...t, done: true, doneAt: Date.now() }),
+    }));
   // ① 案件一覧のリンク並び替え（project.linksを共有しているので詳細ドロワーも同順になる）
   const reorderLinks = (pid, links) =>
     persist(projects.map((p) => p.id !== pid ? p : { ...p, links }));
@@ -1519,6 +1524,19 @@ export default function App() {
     }));
     closeIntake(row.id);
   };
+  // 案件が「完了」なら、残っている未完了タスクも実務上は終わっている。起動時に一度だけ自動で完了にする
+  const sweptRef = useRef(false);
+  useEffect(() => {
+    if (sweptRef.current) return;
+    const ps = projectsRef.current || [];
+    if (!ps.length) return;
+    const need = ps.some((p) => p.status === "完了" && (p.tasks || []).some((t) => !t.done && !t.repeat));
+    sweptRef.current = true;
+    if (!need) return;
+    persist(ps.map((p) => p.status !== "完了" ? p : {
+      ...p, tasks: (p.tasks || []).map((t) => (t.done || t.repeat) ? t : { ...t, done: true, doneAt: Date.now() }),
+    }));
+  }, [projects]);
   const markSent = (pid, text) => {
     const now = new Date();
     const at = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
@@ -5722,8 +5740,13 @@ function taskDoneSuggestion(p, t) {
   const REQ = /(お願い|ください|下さい|いただけ|頂け|でしょうか|ますか|修正|変更|追加|再度|もう一度)/;
   // 相手からの催促（対応状況・目処・リマインド等）が来ている＝何かのボールはこちら。完了提案は全て止める
   const REMIND = /(対応状況|ご対応いかが|進捗いかが|状況いかが|目処|目途|めど|お待ちしております|リマインド|その後いかが|いつ頃(対応|可能)|お時間経って)/;
-  if (msgs.slice(-4).some((x) => x.who === "client" && REMIND.test(stripQuoted(x.body)))) return null;
-  for (let i = msgs.length - 1; i >= 0 && i >= msgs.length - 6; i--) {
+  // 相手からの催促が「直近の相手発言4件」に含まれていたら、何かのボールはこちら。提案しない
+  const cl = msgs.filter((x) => x.who === "client").slice(-4);
+  if (cl.some((x) => REMIND.test(stripQuoted(x.body)))) return null;
+  // タスクが作られた後の報告だけを対象にする（それ以前の報告は別ラウンドのもの）
+  const born = t.createdAt || 0;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (born && atToTs(msgs[i].at) && atToTs(msgs[i].at) < born) break;
     const m = msgs[i];
     if (m.who !== "me") continue;
     const b = stripQuoted(m.body);
