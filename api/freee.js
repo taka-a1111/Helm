@@ -104,8 +104,23 @@ export default async function handler(req, res) {
       pending = { count: un.length, amount: un.reduce((s, x) => s + (Number(x.amount) || 0), 0) };
     } catch { /* 権限不足等では黙って0のまま */ }
 
+    // 口座残高（freeeが最後に同期した時点の残高）
+    let balances = [];
+    try {
+      const r = await fetch(`${API}/walletables?company_id=${cid}&with_balance=true`, {
+        headers: { Authorization: `Bearer ${token}`, accept: "application/json" },
+      });
+      if (r.ok) {
+        const ws = (await r.json()).walletables || [];
+        balances = ws
+          .filter((w) => w.type === "bank_account")
+          .map((w) => ({ name: w.name, balance: Number(w.last_balance) || 0, syncedAt: w.last_synced_at || null }));
+      }
+    } catch { /* 取れなければ空のまま */ }
+    const cash = balances.reduce((s2, b) => s2 + b.balance, 0);
+
     res.setHeader("Cache-Control", "s-maxage=1800, stale-while-revalidate=86400");
-    return res.status(200).json({ ok: true, year, current, ytd, months, pending, fetchedAt: new Date().toISOString() });
+    return res.status(200).json({ ok: true, year, current, ytd, months, pending, balances, cash, fetchedAt: new Date().toISOString() });
   } catch (e) {
     return res.status(200).json({ ok: false, error: String((e && e.message) || e) });
   }
