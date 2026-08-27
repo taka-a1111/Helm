@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-27j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-27k"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -2143,7 +2143,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
       )}
 
       {money && money.pending && money.pending.count > 0 && (
-        <a href="https://secure.freee.co.jp/cars" target="_blank" rel="noopener noreferrer" style={S.pendingBar}>
+        <a href={freeeOpenUrl()} target="_blank" rel="noopener noreferrer" style={S.pendingBar}>
           <AlertTriangle size={14} strokeWidth={2.4} style={{ flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 0 }}>
             未処理の明細 {money.pending.count}件（{yenMan(money.pending.amount)}）— 経費に未計上です
@@ -5968,6 +5968,19 @@ function mergeLogEntries(existing, incoming, src) {
 }
 
 // --- ステータスの確信度（✓一致／?不明／⚠矛盾＋提案） ---
+// freeeの「自動で経理」を開くURL。
+// Androidではintent://でアプリ起動を試み、アプリが無ければブラウザに落ちる（S.browser_fallback_url）
+const FREEE_CARS_URL = "https://secure.freee.co.jp/cars";
+function freeeOpenUrl() {
+  const ua = (typeof navigator !== "undefined" && navigator.userAgent) || "";
+  if (/Android/i.test(ua)) {
+    return "intent://secure.freee.co.jp/cars#Intent;scheme=https;package=jp.co.freee.freee;"
+      + "S.browser_fallback_url=" + encodeURIComponent(FREEE_CARS_URL) + ";end";
+  }
+  if (/iPhone|iPad|iPod/i.test(ua)) return FREEE_CARS_URL; // iOSはユニバーサルリンクでアプリが開く
+  return FREEE_CARS_URL;
+}
+
 // タスク名から照合用のキーワードを抜く（漢字2字以上／カタカナ2字以上／英数3字以上）
 const TASK_STOP = /^(対応|作成|修正|確認|提出|納品|作業|依頼|実施|検討|準備|開始|完了|送付|連絡|返信|反映|設定|追加|変更|調整|見直|報告|相談|打合|会議|予約|購入)$/;
 function taskKeywords(title) {
