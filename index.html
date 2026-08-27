@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -160,7 +160,7 @@ const FOCUS_FILTERS = [
 
 const INBOX_ID = "__inbox__";
 function makeInbox() {
-  return { id: INBOX_ID, company: "案件なし", platform: "その他", work: "", reward: 0,
+  return { id: INBOX_ID, company: "案件なし", platform: "その他", work: "", reward: 0, orphans: [], orphanSkip: [],
     status: "進行中", reply: "なし", deadline: "", note: "",
     received: "", replyDraft: "", repliedAt: null, replyUrl: "", replyHistory: [], summary: "", tasks: [] };
 }
@@ -770,9 +770,21 @@ export default function App() {
         if (!data.ok || !Array.isArray(data.mails)) return;
         const ps = projectsRef.current || [];
         const byPid = {};
+        const orphans = {}; // どの案件にも紐づかなかったやり取り
+        const inboxNow = ps.find((x) => x.id === INBOX_ID) || {};
+        const skip = new Set(inboxNow.orphanSkip || []);
         for (const mail of data.mails) {
           const p = matchMailToProject(mail, ps);
-          if (!p) continue;
+          if (!p) {
+            const o = orphanOf(mail);
+            if (o && !skip.has(o.key)) {
+              const cur = orphans[o.key];
+              orphans[o.key] = cur
+                ? { ...cur, count: cur.count + 1, at: (o.at > cur.at ? o.at : cur.at) }
+                : o;
+            }
+            continue;
+          }
           let entry = null;
           if (mail.kind === "cw") {
             // CW通知メールは「確認URL → 本文 → 同じURL」構造。2つのURL行の間を本文として抽出する
@@ -806,9 +818,15 @@ export default function App() {
           }
           if (entry && entry.body) (byPid[p.id] = byPid[p.id] || []).push(entry);
         }
-        if (!Object.keys(byPid).length) return;
+        const orphanList = Object.keys(orphans).map((k) => orphans[k]);
+        if (!Object.keys(byPid).length && !orphanList.length) return;
         let changed = false;
         const next = (projectsRef.current || []).map((p) => {
+          if (p.id === INBOX_ID && orphanList.length) {
+            const keep = (p.orphans || []).filter((o) => !orphans[o.key]);
+            const merged = [...keep, ...orphanList].slice(-20);
+            if (JSON.stringify(merged) !== JSON.stringify(p.orphans || [])) { changed = true; return { ...p, orphans: merged }; }
+          }
           const inc = byPid[p.id];
           if (!inc) return p;
           const merged = mergeLogEntries(p.msgs || [], inc, inc[0].src);
@@ -1653,6 +1671,51 @@ export default function App() {
     });
     if (touched) persist(next);
   }, [projects]);
+  // 未割当のやり取りを既存案件に紐づける（窓口リンクを登録して、以後は自動で入るようにする）
+  const assignOrphan = (key, pid) => {
+    const ps = projectsRef.current || [];
+    const inbox = ps.find((p) => p.id === INBOX_ID);
+    const o = inbox && (inbox.orphans || []).find((x) => x.key === key);
+    if (!o) return;
+    persist(ps.map((p) => {
+      if (p.id === INBOX_ID) return { ...p, orphans: (p.orphans || []).filter((x) => x.key !== key) };
+      if (p.id !== pid) return p;
+      const links = p.links || [];
+      const add = o.url && !links.some((l) => l.url === o.url)
+        ? [{ id: uid(), label: o.kind === "ランサーズ" ? "ランサーズ" : "CW", url: o.url }] : [];
+      // Gmailは相手の名前をログに残すことで、以後の照合が効くようにする
+      const msgs = o.kind === "Gmail"
+        ? mergeLogEntries(p.msgs || [], [{ who: "client", name: o.name, at: o.at,
+            body: `【${o.subject}】\n（このやり取りを${p.company}に紐づけました）`, partial: true, src: "gmail" }], "gmail").list
+        : (p.msgs || []);
+      return { ...p, links: [...links, ...add], msgs, autoLink: add.length ? { labels: [add[0].label], at: Date.now() } : p.autoLink };
+    }));
+  };
+  // 未割当のやり取りから新しい案件を作る
+  const newFromOrphan = (key) => {
+    const ps = projectsRef.current || [];
+    const inbox = ps.find((p) => p.id === INBOX_ID);
+    const o = inbox && (inbox.orphans || []).find((x) => x.key === key);
+    if (!o) return;
+    const platform = o.kind === "クラウドワークス" ? "クラウドワークス" : o.kind === "ランサーズ" ? "ランサーズ" : "直契約";
+    const np = {
+      id: uid(), company: o.name || o.subject || "新規案件", platform, work: "", reward: 0,
+      status: "進行中", reply: "なし", deadline: "", start: "", note: "", summary: "",
+      received: "", replyDraft: "", repliedAt: null, replyUrl: "", replyHistory: [], tasks: [],
+      status: "進行中", createdAt: Date.now(),
+      links: o.url ? [{ id: uid(), label: o.kind === "ランサーズ" ? "ランサーズ" : "CW", url: o.url }] : [],
+      msgs: o.kind === "Gmail"
+        ? [{ id: uid(), who: "client", name: o.name, at: o.at, body: `【${o.subject}】`, partial: true, src: "gmail" }]
+        : [],
+    };
+    persist([...ps.map((p) => p.id !== INBOX_ID ? p : { ...p, orphans: (p.orphans || []).filter((x) => x.key !== key) }), np]);
+  };
+  // 以後この相手は提案しない
+  const ignoreOrphan = (key) =>
+    persist((projectsRef.current || []).map((p) => p.id !== INBOX_ID ? p : {
+      ...p, orphans: (p.orphans || []).filter((x) => x.key !== key),
+      orphanSkip: Array.from(new Set([...(p.orphanSkip || []), key])).slice(-200),
+    }));
   const ackAutoLink = (pid) =>
     persist((projectsRef.current || []).map((p) => p.id !== pid ? p : { ...p, autoLink: null }));
   // 自動完了を取り消す（以後このタスクでは提案しない）
@@ -1920,7 +1983,7 @@ export default function App() {
                 <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />
               </div>
               {focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
-              {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onUndoAutoSt={undoAutoStatus} onAckAutoSt={ackAutoStatus} intakes={intakes} onApplyIntake={applyIntake} onDropIntake={closeIntake} onClearAuto={clearAutoMarks} money={money} heldRank={held.projRank} />}
+              {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onUndoAutoSt={undoAutoStatus} onAckAutoSt={ackAutoStatus} intakes={intakes} onApplyIntake={applyIntake} onDropIntake={closeIntake} orphans={(projects.find((p) => p.id === INBOX_ID) || {}).orphans || []} onAssignOrphan={assignOrphan} onNewOrphan={newFromOrphan} onIgnoreOrphan={ignoreOrphan} onClearAuto={clearAutoMarks} money={money} heldRank={held.projRank} />}
               {focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             </div>
             <div style={S.triCol}>
@@ -1934,7 +1997,7 @@ export default function App() {
           <>
             {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
             {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
-            {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onUndoAutoSt={undoAutoStatus} onAckAutoSt={ackAutoStatus} intakes={intakes} onApplyIntake={applyIntake} onDropIntake={closeIntake} onClearAuto={clearAutoMarks} money={money} heldRank={held.projRank} />}
+            {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onUndoAutoSt={undoAutoStatus} onAckAutoSt={ackAutoStatus} intakes={intakes} onApplyIntake={applyIntake} onDropIntake={closeIntake} orphans={(projects.find((p) => p.id === INBOX_ID) || {}).orphans || []} onAssignOrphan={assignOrphan} onNewOrphan={newFromOrphan} onIgnoreOrphan={ignoreOrphan} onClearAuto={clearAutoMarks} money={money} heldRank={held.projRank} />}
             {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
           </>
@@ -2021,7 +2084,7 @@ export default function App() {
 /* ============================================================
    フォーカス（ダッシュボード）
    ============================================================ */
-function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onWipTask, onToggleProject, onReorderTask, onMoveTask, onSetStatus, onOpenReply, onNoReply, onAckSug, onAckTaskSug, onUndoAutoSt, onAckAutoSt, intakes, onApplyIntake, onDropIntake, onClearAuto, money, heldRank }) {
+function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onWipTask, onToggleProject, onReorderTask, onMoveTask, onSetStatus, onOpenReply, onNoReply, onAckSug, onAckTaskSug, onUndoAutoSt, onAckAutoSt, intakes, onApplyIntake, onDropIntake, onClearAuto, orphans, onAssignOrphan, onNewOrphan, onIgnoreOrphan, money, heldRank }) {
   const [openCard, setOpenCard] = useState(null);
   const [openMsg, setOpenMsg] = useState(null);
   const [addingTop, setAddingTop] = useState(false); // 右上「＋追加」（今日のタスクとして追加）
@@ -2181,6 +2244,10 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
     <div style={S.colWrap}>
       {(intakes || []).map((row) => (
         <IntakeCard key={row.id} row={row} onApply={onApplyIntake} onDrop={onDropIntake} />
+      ))}
+      {(orphans || []).map((o) => (
+        <OrphanCard key={o.key} o={o} projects={(allProjects || projects).filter((p) => p.id !== INBOX_ID && p.status !== "完了")}
+          onAssign={onAssignOrphan} onNew={onNewOrphan} onIgnore={onIgnoreOrphan} />
       ))}
       <AutoAddedCard projects={allProjects || projects} onClear={onClearAuto} />
       <div style={{ display: "contents" }}>
@@ -2509,6 +2576,35 @@ function ProjectsView({ projects, onOpen }) {
   );
 }
 
+// Helmに未登録の相手とのやり取りを見つけたときのカード
+function OrphanCard({ o, projects, onAssign, onNew, onIgnore }) {
+  const [pick, setPick] = useState(false);
+  return (
+    <div style={S.orphanCard}>
+      <div style={S.intakeHead}>
+        <Inbox size={15} color="#D9A23B" strokeWidth={2.4} />
+        <span style={S.intakeTitle}>{o.name || "差出人不明"}</span>
+        <span style={S.intakeSrc}>{o.kind}{o.count > 1 ? `・${o.count}件` : ""}</span>
+      </div>
+      {o.subject && <div style={S.intakeItemNote}>{o.subject}</div>}
+      <div style={S.intakeItemNote}>Helmに未登録のやり取りです</div>
+      {pick ? (
+        <div style={S.candRow}>
+          {projects.map((p) => (
+            <button key={p.id} style={S.candChip} onClick={() => onAssign(o.key, p.id)}>{p.company}</button>
+          ))}
+          <button style={S.intakeDrop} onClick={() => setPick(false)}>やめる</button>
+        </div>
+      ) : (
+        <div style={S.intakeBtns}>
+          <button style={S.intakeApply} onClick={() => setPick(true)}>既存の案件へ</button>
+          <button style={S.orphanNew} onClick={() => onNew(o.key)}>新規登録</button>
+          <button style={S.intakeDrop} onClick={() => onIgnore(o.key)}>無視</button>
+        </div>
+      )}
+    </div>
+  );
+}
 // 今回メッセージから自動で追加・追記されたタスクのまとめ
 function AutoAddedCard({ projects, onClear }) {
   const rows = [];
@@ -6415,6 +6511,31 @@ const projThreadKeys = (p) => threadKeys(
   [p.replyUrl || ""].concat(((p.links || []).map((l) => l.url || "")), ((p.msgs || []).map((m) => m.curl || ""))).join(" ")
 );
 
+// どの案件にも紐づかなかったメールを「未割当のやり取り」として1件にまとめる。
+// スレッドID（CW/ランサーズ）か差出人アドレスをキーにして、同じ相手を何度も出さないようにする
+function orphanOf(mail) {
+  const raw = String(mail.body || mail.excerpt || "");
+  const name = peelName(mail.client || mail.fromName || (mail.from || "").split("@")[0] || "");
+  const at = mail.at || "";
+  const subject = String(mail.subject || "").slice(0, 80);
+  if (mail.kind === "cw") {
+    const u = (raw.match(/https:\/\/crowdworks\.jp\/messages\/\d+/) || [""])[0];
+    if (!u) return null;
+    return { key: "cw:" + u.split("/").pop(), kind: "クラウドワークス", name, at, subject, url: u, count: 1 };
+  }
+  if (mail.kind === "lancers") {
+    const u = (raw.match(/https:\/\/www\.lancers\.jp\/mypage\/message\?boardId=\d+/) || [""])[0];
+    if (!u) return null;
+    return { key: "lc:" + u.split("=").pop(), kind: "ランサーズ", name, at, subject, url: u, count: 1 };
+  }
+  // Gmail：通知・配信系は対象外。個人とのやり取りだけ拾う
+  const hay = `${mail.from || ""} ${mail.fromName || ""} ${subject}`;
+  if (/no-?reply|noreply|newsletter|magazine|mailmag|info@|news@|support@|配信停止|メールマガジン/i.test(hay)) return null;
+  const addr = String(mail.from || "").toLowerCase();
+  if (!addr || mail.dir === "out") return null;
+  return { key: "gm:" + addr, kind: "Gmail", name: name || addr, at, subject, url: "", count: 1 };
+}
+
 // メールを案件に照合：クライアント名・差出人・件名を、案件名とログの登場人物に突き合わせる
 function matchMailToProject(mail, projects) {
   const norm = (s) => (s || "").toLowerCase().replace(/[\s　]/g, "");
@@ -7336,6 +7457,8 @@ const S = {
 
   laneBar: { display: "flex", alignItems: "center", gap: 9 },
   laneBarTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 15.5, marginRight: "auto" },
+  orphanCard: { border: "1px solid rgba(217,162,59,0.5)", background: "rgba(217,162,59,0.07)", borderRadius: 12, padding: 12, display: "grid", gap: 8, marginBottom: 12 },
+  orphanNew: { border: `1px solid ${C.line}`, borderRadius: 9, background: C.panel, color: C.ink, fontSize: 13.5, fontWeight: 700, padding: "9px 14px", cursor: "pointer" },
   autoCard: { border: `1px solid ${C.line}`, background: C.panel, borderRadius: 12, padding: 12, display: "grid", gap: 8, marginBottom: 12 },
   newChip: { display: "inline-block", marginRight: 6, fontSize: 10.5, fontWeight: 800, color: C.accent, background: "rgba(107,138,255,0.16)", borderRadius: 5, padding: "1px 5px", verticalAlign: "1px" },
   intakeCard: { border: `1px solid ${C.accent}`, background: "rgba(107,138,255,0.08)", borderRadius: 12, padding: 12, display: "grid", gap: 8, marginBottom: 12 },
