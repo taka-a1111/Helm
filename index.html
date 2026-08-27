@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-27g"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-27h"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -2076,7 +2076,6 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
   const cards = [
     { key: "money", label: cur ? `${Number(cur.month.slice(5))}月の収支` : "今月の収支",
       value: cur ? yenMan(cur.net) : "—", unit: "", color: cur && cur.net < 0 ? "#FF8A8A" : "#51CF66", Icon: Coins },
-    { key: "progress", label: "未請求の見込み", value: kpi.revenue ? yenMan(kpi.revenue) : "—", unit: "", color: "#E8ECF2", Icon: Briefcase, count: kpi.inProgress },
   ];
 
   const titleOf = { reply: "本日中に返信", weekDue: "7日以内が締切の案件", overdue: "期限を過ぎている案件", progress: "進行中の案件", money: "月ごとの収支（freee）" };
