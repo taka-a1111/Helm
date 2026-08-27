@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-27d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-27e"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -4544,7 +4544,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
           {/* ===== リンク（Claude / GitHub / 公開URL など） ===== */}
           <div style={S.linkSectionRow}>
             <Link2 size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
-            <LinksField links={d.links} onChange={(v) => set("links", v)} />
+            <LinksField links={d.links} candidates={linkCandidates(d)} onChange={(v) => set("links", v)} />
           </div>
 
           {/* ===== やり取りログ ===== */}
@@ -5540,6 +5540,63 @@ function urlAutoLabel(url) {
 }
 function linkLabelOf(l) { return (l && l.label && l.label.trim()) ? l.label.trim() : urlAutoLabel(l && l.url); }
 
+// ---- リンク候補：やり取りログに出てきたURLから、登録しそうなものを拾う ----
+// 追跡パラメータ（utm_*, ref）を落として同一視するための正規化キー
+function linkKey(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "");
+    const doc = u.pathname.match(/\/d\/([A-Za-z0-9_-]{20,})/);
+    if (/docs\.google\.com|drive\.google\.com/.test(host) && doc) return host + "/" + doc[1];
+    if (/chatwork\.com/.test(host)) { const rid = (u.hash.match(/rid(\d+)/) || [])[1]; return rid ? host + "/rid" + rid : host + u.hash; }
+    if (/crowdworks\.jp/.test(host)) { const m = u.pathname.match(/\/messages\/(\d+)/); return m ? host + "/messages/" + m[1] : host + u.pathname; }
+    if (/lancers\.jp/.test(host)) { const b = u.searchParams.get("boardId"); return b ? host + "/board/" + b : host + u.pathname; }
+    if (/vercel\.app|github\.com|claude\.ai/.test(host)) return host + u.pathname.replace(/\/(index\.html)?$/, "");
+    return host + u.pathname;
+  } catch { return String(url || ""); }
+}
+// 表示・登録用にURLを短く整える（追跡パラメータを除去）
+function linkClean(url) {
+  try {
+    const u = new URL(url);
+    ["ref", "utm_medium", "utm_source", "utm_campaign", "utm_content", "utm_term", "usp"].forEach((k) => u.searchParams.delete(k));
+    return u.toString().replace(/\?$/, "");
+  } catch { return url; }
+}
+const LINK_WANTED = /(chatwork\.com|crowdworks\.jp|lancers\.jp|coconala\.com|claude\.ai|github\.com|vercel\.app|docs\.google\.com|drive\.google\.com)/;
+function linkCandidates(p) {
+  if (!p) return [];
+  const have = new Set();
+  [p.replyUrl || ""].concat((p.links || []).map((l) => l.url || "")).forEach((u) => { if (u) have.add(linkKey(u)); });
+  const re = /https?:\/\/[^\s"'<>()「」【】、,]+/g;
+  const seen = new Map();
+  (p.msgs || []).forEach((m) => {
+    const pool = [m.curl || ""].concat((String(m.body || "").match(re) || []));
+    pool.forEach((raw) => {
+      if (!raw) return;
+      let u = String(raw).replace(/[.,、。]+$/, "");
+      // Gmail等のリダイレクト（google.com/url?q=...）は中身のURLに戻す
+      try {
+        const g = new URL(u);
+        if (/(^|\.)google\.com$/.test(g.hostname) && g.pathname === "/url" && g.searchParams.get("q")) u = g.searchParams.get("q");
+      } catch { return; }
+      if (!LINK_WANTED.test(u)) return;
+      let host = ""; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch { return; }
+      if (host === "vercel.app" || (host === "docs.google.com" && !/\/d\//.test(u))) return; // 本文中の書きかけURLは除外
+      // CW/ランサーズのスレッドURLは案件に1本あれば十分。最新のものだけ残す
+      if (/crowdworks\.jp|lancers\.jp/.test(host)) {
+        seen.delete("__thread__");
+        seen.set("__thread__", { url: linkClean(u), label: urlAutoLabel(u) });
+        return;
+      }
+      const k = linkKey(u);
+      if (!k || have.has(k)) return;
+      seen.set(k, { url: linkClean(u), label: urlAutoLabel(u) }); // 後に出たものほど新しいので上書き
+    });
+  });
+  return Array.from(seen.values()).slice(-8).reverse();
+}
+
 // ---- ② Claudeリンク：Androidスマホではアプリ（intent://）で開く。失敗時はブラウザにフォールバック ----
 function isAndroidUA() { try { return /Android/i.test(navigator.userAgent || ""); } catch { return false; } }
 function claudeIntentUrl(url) {
@@ -6282,7 +6339,7 @@ function MarqueeText({ text, style, gap = 40, seconds = 10 }) {
 }
 
 // 案件詳細のリンク編集フィールド（Claude / GitHub / 公開URL などをワンタップ追加）
-function LinksField({ links, onChange }) {
+function LinksField({ links, candidates, onChange }) {
   const list = Array.isArray(links) ? links : [];
   const [editId, setEditId] = useState(null);
   // 常に最新のlistを参照するためのref（LinkEditModalのアンマウント時保存で使う）
@@ -6312,6 +6369,7 @@ function LinksField({ links, onChange }) {
   // 確認待ちのペンディングリンク（貼付け → ラベル確認 → 追加）
   const [pending, setPending] = useState([]);
   const [pasteVal, setPasteVal] = useState("");
+  const [candOpen, setCandOpen] = useState(false);
   const pushPending = (urls) => {
     const known = new Set(listRef.current.map((l) => (l.url || "").trim()));
     const additions = urls
@@ -6378,6 +6436,35 @@ function LinksField({ links, onChange }) {
           </div>
         );
       })}
+      {(candidates || []).length > 0 && (() => {
+        const known = new Set(listRef.current.map((l) => linkKey(l.url || "")));
+        const fresh = (candidates || []).filter((c) => !known.has(linkKey(c.url)));
+        if (!fresh.length) return null;
+        const shown = candOpen ? fresh : fresh.slice(0, 4);
+        return (
+          <div style={S.candWrap}>
+            <div style={S.candHead}>
+              <Sparkles size={13} color={C.accent} strokeWidth={2.4} />
+              <span>やり取りから見つけたリンク</span>
+              {fresh.length > 4 && (
+                <button style={S.candMore} onClick={() => setCandOpen((v) => !v)}>
+                  {candOpen ? "たたむ" : `ほか${fresh.length - 4}件`}
+                </button>
+              )}
+            </div>
+            <div style={S.candRow}>
+              {shown.map((c) => (
+                <button key={c.url} style={S.candChip} title={c.url}
+                  onClick={() => onChangeRef.current([...listRef.current, { id: uid(), label: c.label || "", url: c.url }])}>
+                  <Plus size={13} strokeWidth={2.8} />
+                  <Favicon url={c.url} size={14} />
+                  <span style={S.candChipName}>{c.label || "リンク"}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
       <div style={S.linkPasteRow}>
         <input
           style={S.linkPasteInput}
@@ -7211,6 +7298,12 @@ const S = {
   linkUrlInput: { flex: 1, minWidth: 120, background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 9px", fontSize: 14, color: C.ink },
   linkOpenMini: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 8, color: C.accent, background: "rgba(107,138,255,0.14)", textDecoration: "none" },
   linkDelMini: { flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 8, border: "none", background: "transparent", color: C.ink3 },
+  candWrap: { display: "grid", gap: 6, marginTop: 4 },
+  candHead: { display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 700, color: C.ink3 },
+  candMore: { marginLeft: "auto", border: "none", background: "transparent", color: C.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 },
+  candRow: { display: "flex", flexWrap: "wrap", gap: 6 },
+  candChip: { display: "inline-flex", alignItems: "center", gap: 4, maxWidth: "100%", border: `1px dashed ${C.line}`, background: "transparent", color: C.ink2, borderRadius: 8, padding: "6px 10px", fontSize: 13, fontWeight: 700, cursor: "pointer" },
+  candChipName: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   linkPresetRow: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 },
   linkPresetBtn: { display: "inline-flex", alignItems: "center", gap: 3, border: `1px solid ${C.line}`, background: C.panel2, color: C.ink2, borderRadius: 8, padding: "5px 10px", fontSize: 13, fontWeight: 600 },
   linkPasteRow: { display: "flex", alignItems: "stretch", gap: 6, marginTop: 6, marginBottom: 6 },
