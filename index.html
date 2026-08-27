@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28f"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28g"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -6900,13 +6900,26 @@ function LinksField({ links, candidates, onChange }) {
       setPasteVal("");
     }
   };
+  // 数字だけを入れたときは、IDとしてURLに組み立てる（ChatworkのルームIDが主な用途）
+  const idToUrl = (v) => {
+    const t = String(v || "").trim();
+    let m = t.match(/^(?:rid)?(\d{6,12})$/i);
+    if (m) return `https://www.chatwork.com/#!rid${m[1]}`;              // Chatwork ルームID
+    m = t.match(/^cw[:\s-]*(\d{6,12})$/i);
+    if (m) return `https://crowdworks.jp/messages/${m[1]}`;             // クラウドワークス スレッドID
+    m = t.match(/^(?:lc|lancers)[:\s-]*(\d{4,12})$/i);
+    if (m) return `https://www.lancers.jp/mypage/message?boardId=${m[1]}`; // ランサーズ boardId
+    return "";
+  };
   const onKeyBulk = (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
     const urls = extractUrls(pasteVal);
     const single = pasteVal.trim();
+    const asId = idToUrl(single);
     if (urls.length) pushPending(urls);
     else if (/^https?:\/\//i.test(single)) pushPending([single]);
+    else if (asId) pushPending([asId]);
     setPasteVal("");
   };
   const editing = editId ? list.find((l) => l.id === editId) : null;
@@ -6968,13 +6981,15 @@ function LinksField({ links, candidates, onChange }) {
       <div style={S.linkPasteRow}>
         <input
           style={S.linkPasteInput}
-          placeholder="URLを貼り付け"
+          placeholder="URLを貼り付け／ルームIDでも可（例 444716232）"
           value={pasteVal}
           onChange={(e) => setPasteVal(e.target.value)}
           onPaste={onPasteBulk}
           onKeyDown={onKeyBulk}
         />
-        <button style={S.linkAddManualBtn} onClick={() => add("")} title="URL以外・手入力で追加">
+        <button style={S.linkAddManualBtn}
+          onClick={() => { const u = idToUrl(pasteVal); if (u) { pushPending([u]); setPasteVal(""); } else add(""); }}
+          title="URL以外・手入力で追加（数字だけならルームIDとして解釈）">
           <Plus size={16} strokeWidth={2.6} />
         </button>
       </div>
