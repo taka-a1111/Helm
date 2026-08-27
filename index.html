@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28e"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1716,6 +1716,12 @@ export default function App() {
       ...p, orphans: (p.orphans || []).filter((x) => x.key !== key),
       orphanSkip: Array.from(new Set([...(p.orphanSkip || []), key])).slice(-200),
     }));
+  // 「無視」した相手をリセットする（次の取り込みでまた提案される）
+  const resetOrphanSkip = () => {
+    persist((projectsRef.current || []).map((p) => p.id !== INBOX_ID ? p : { ...p, orphanSkip: [] }));
+    if (gmailPullRef.current) setTimeout(() => gmailPullRef.current(), 400);
+  };
+  const orphanSkipCount = ((projects.find((p) => p.id === INBOX_ID) || {}).orphanSkip || []).length;
   const ackAutoLink = (pid) =>
     persist((projectsRef.current || []).map((p) => p.id !== pid ? p : { ...p, autoLink: null }));
   // 自動完了を取り消す（以後このタスクでは提案しない）
@@ -2008,7 +2014,7 @@ export default function App() {
       {showSearch && <SearchModal projects={projects} recentIds={recentIds}
         onPick={(p) => { setShowSearch(false); setEditing(p); pushRecent(p.id); }}
         onClose={goBack} />}
-      {showSettings && <SettingsModal onClose={goBack}
+      {showSettings && <SettingsModal onClose={goBack} onResetOrphanSkip={resetOrphanSkip} orphanSkipCount={orphanSkipCount}
         sync={sync} syncState={syncState} onSaveSync={saveSync} onSyncPush={syncPush} onSyncPull={syncPull} onDiagnose={syncDiagnose} />}
 
       {/* ===== Drawer ===== */}
@@ -5036,7 +5042,8 @@ function ReplyHistoryList({ history }) {
   );
 }
 
-function SettingsModal({ onClose, sync, syncState, onSaveSync, onSyncPush, onSyncPull, onDiagnose }) {
+function SettingsModal({ onClose, sync, syncState, onSaveSync, onSyncPush, onSyncPull, onDiagnose, onResetOrphanSkip, orphanSkipCount }) {
+  const [orphanNote, setOrphanNote] = useState("");
   const [key, setKey] = useState("");
   const [saved, setSaved] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -5125,6 +5132,17 @@ function SettingsModal({ onClose, sync, syncState, onSaveSync, onSyncPush, onSyn
             <div style={{ ...S.syncStatus, color: syncStatusColor }}>{syncStatusText()}</div>
           )}
           <div style={S.settingWarn}>複数端末で同時に編集すると、後から保存した内容で上書きされます。</div>
+
+          <div style={S.settingDivider} />
+          <div style={S.settingNote}>
+            未登録のやり取りで「無視」した相手：<b style={{ color: C.ink }}>{orphanSkipCount}件</b><br />
+            リセットすると、次の取り込みでもう一度提案されます。
+          </div>
+          <button style={S.syncSubBtn} disabled={!orphanSkipCount}
+            onClick={() => { onResetOrphanSkip && onResetOrphanSkip(); setOrphanNote("リセットしました。まもなく再提案されます"); }}>
+            無視した相手をリセット
+          </button>
+          {orphanNote && <div style={S.settingNote}>{orphanNote}</div>}
 
           <div style={S.settingDivider} />
           <div style={S.settingNote}>サンプルデータに戻します。この端末・ブラウザに保存中の案件・タスクはすべて消えます。</div>
