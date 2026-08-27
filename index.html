@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-27k"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-27l"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -378,7 +378,7 @@ function normalizeProjects(arr) {
       msgs: cleanMsgs(Array.isArray(p.msgs) ? p.msgs : []),
       tsq: p.tsq ? (p.tsq.items ? p.tsq : { srcId: p.tsq.srcId || "", items: p.tsq.title ? [{ title: p.tsq.title, note: p.tsq.note || "", due: p.tsq.due || "", urgent: !!p.tsq.urgent }] : [] }) : null, tsqSeen: p.tsqSeen ?? "", rsug: p.rsug ?? null, autoSt: p.autoSt ?? null, rneed: (p.rneed && p.rneed.need === false && p.rneed.v !== 2) ? null : (p.rneed ?? null), statusAt: p.statusAt ?? null,
       received: p.received ?? "", replyDraft: p.replyDraft ?? "", repliedAt: p.repliedAt ?? null, replyUrl: p.replyUrl ?? "", replyHistory: p.replyHistory ?? [], summary: p.summary ?? "",
-      tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "", note: t.note ?? "", repeat: t.repeat ?? null, wip: t.wip ?? false, doneAt: t.doneAt ?? (t.done ? Date.now() : null), sugOff: t.sugOff ?? false, createdAt: t.createdAt ?? Date.now(), isAuto: t.isAuto ?? null, autoAt: t.autoAt ?? null })),
+      tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "", note: t.note ?? "", repeat: t.repeat ?? null, wip: t.wip ?? false, doneAt: t.doneAt ?? (t.done ? Date.now() : null), sugOff: t.sugOff ?? false, createdAt: t.createdAt ?? Date.now(), isAuto: t.isAuto ?? null, autoAt: t.autoAt ?? null, autoDone: t.autoDone ?? null })),
     };
     // ★リンク一元化：案件links＋返信先URL＋全タスクlinks を案件へ寄せ、重複URLは1本化。返信先は kind:reply。タスクからlinksは除去。
     const merged = []; const seen = new Set();
@@ -1602,6 +1602,39 @@ export default function App() {
         autoSt: { from: p.status, to: sg.suggest, reason: sg.reason, at: Date.now() } };
     }));
   }, [projects]);
+  // メッセージから完了報告を検知したタスクは自動で完了にする。印(autoDone)を残して戻せるようにする
+  useEffect(() => {
+    const ps = projectsRef.current || [];
+    if (!ps.length) return;
+    let touched = false;
+    const next = ps.map((p) => {
+      if (p.id === INBOX_ID || p.status === "完了") return p;
+      let tasks = p.tasks || [];
+      let hit = false;
+      tasks = tasks.map((t) => {
+        if (t.done || t.sugOff || t.repeat) return t;
+        const sg = taskDoneSuggestion(p, t);
+        // 「案件は完了」由来のものは別の掃除に任せ、ここではメッセージ由来だけを自動適用する
+        if (!sg || !/報告済み/.test(sg.reason || "")) return t;
+        hit = true;
+        return { ...t, done: true, doneAt: Date.now(), autoDone: { at: Date.now(), reason: sg.reason } };
+      });
+      if (!hit) return p;
+      touched = true;
+      return { ...p, tasks };
+    });
+    if (touched) persist(next);
+  }, [projects]);
+  // 自動完了を取り消す（以後このタスクでは提案しない）
+  const undoAutoDone = (pid, tid) =>
+    persist((projectsRef.current || []).map((p) => p.id !== pid ? p : {
+      ...p, tasks: (p.tasks || []).map((t) => t.id !== tid ? t
+        : { ...t, done: false, doneAt: null, autoDone: null, sugOff: true }),
+    }));
+  const ackAutoDone = (pid, tid) =>
+    persist((projectsRef.current || []).map((p) => p.id !== pid ? p : {
+      ...p, tasks: (p.tasks || []).map((t) => t.id !== tid ? t : { ...t, autoDone: null }),
+    }));
   // 自動変更を元に戻す（以後この件では提案しない）
   const undoAutoStatus = (pid) =>
     persist((projectsRef.current || []).map((p) => p.id !== pid || !p.autoSt ? p : {
@@ -1614,7 +1647,7 @@ export default function App() {
   // 自動追加の「NEW」印をまとめて消す
   const clearAutoMarks = () =>
     persist((projectsRef.current || []).map((p) => ({
-      ...p, tasks: (p.tasks || []).map((t) => t.isAuto ? { ...t, isAuto: null } : t),
+      ...p, tasks: (p.tasks || []).map((t) => (t.isAuto || t.autoDone) ? { ...t, isAuto: null, autoDone: null } : t),
     })));
   // ── freee収支（/api/freee）───────────────────────────────
   // サーバー側で30分キャッシュしているので、起動時と復帰時に取りにいくだけでよい
@@ -2448,18 +2481,23 @@ function ProjectsView({ projects, onOpen }) {
 // 今回メッセージから自動で追加・追記されたタスクのまとめ
 function AutoAddedCard({ projects, onClear }) {
   const rows = [];
-  (projects || []).forEach((p) => (p.tasks || []).forEach((t) => { if (t.isAuto) rows.push({ p, t }); }));
+  (projects || []).forEach((p) => (p.tasks || []).forEach((t) => {
+    if (t.isAuto) rows.push({ p, t, kind: t.isAuto });
+    else if (t.autoDone) rows.push({ p, t, kind: "done" });
+  }));
   if (!rows.length) return null;
-  rows.sort((a, b) => (b.t.autoAt || 0) - (a.t.autoAt || 0));
+  rows.sort((a, b) => ((b.t.autoAt || (b.t.autoDone && b.t.autoDone.at) || 0) - (a.t.autoAt || (a.t.autoDone && a.t.autoDone.at) || 0)));
   return (
     <div style={S.autoCard}>
       <div style={S.intakeHead}>
         <ListPlus size={15} color={C.accent} strokeWidth={2.4} />
-        <span style={S.intakeTitle}>メッセージから自動追加（{rows.length}件）</span>
+        <span style={S.intakeTitle}>メッセージから自動反映（{rows.length}件）</span>
       </div>
-      {rows.map(({ p, t }) => (
+      {rows.map(({ p, t, kind }) => (
         <div key={t.id} style={S.intakeItem}>
-          <span style={S.intakeTag}>{t.isAuto === "append" ? "追記" : "追加"}</span>
+          <span style={{ ...S.intakeTag, ...(kind === "done" ? { color: "#8FBF9A", borderColor: "rgba(81,207,102,0.45)" } : {}) }}>
+            {kind === "append" ? "追記" : kind === "done" ? "完了" : "追加"}
+          </span>
           <div style={{ minWidth: 0 }}>
             <div style={S.intakeItemTitle}>{t.title}</div>
             <div style={S.intakeItemNote}>{p.company}</div>
@@ -5992,7 +6030,9 @@ function taskKeywords(title) {
 }
 // このタスク、実はもう終わっているのでは？の検知
 // 「ご報告」「確認しました」のような汎用語は進捗報告にも使われるため、最終成果の動詞だけに絞る
-const DONE_REPORT = /(納品(いた)?しました|納品いたします|最終データ|完了(いた)?しました|校了|公開(いた)?しました|完成(いた)?しました|反映(いた)?しました|対応(いた)?しました|非表示にいたしました|削除(いた)?しました|設定(いた)?しました|変更(いた)?しました|修正(いた)?しました|追加(いた)?しました|更新(いた)?しました|実装(いた)?しました|統一(いた)?しました|調整(いた)?しました)/;
+const DONE_REPORT = /(納品(いた)?しました|納品いたします|最終データ|完了(いた)?しました|校了|公開(いた)?しました|完成(いた)?しました|反映(いた)?しました|対応(いた)?しました|非表示にいたしました|削除(いた)?しました|設定(いた)?しました|変更(いた)?しました|修正(いた)?しました|追加(いた)?しました|更新(いた)?しました|実装(いた)?しました|統一(いた)?しました|調整(いた)?しました|お送り(いた)?します|送付(いた)?します|提出(いた)?します|ご提出いたします|添付)/;
+// 「明日お送りします」等の予告は完了ではない
+const FUTURE_SEND = /(明日|明後日|来週|来月|後日|追って|改めて|のちほど|後ほど|次回|〜まで|までに)[^。\n]{0,12}(お送り|送付|提出|ご連絡)/;
 // 途中経過のしるし。これが含まれる報告は「まだ作業中」なので完了提案しない
 const PARTIAL_REPORT = /(初校|たたき台|ドラフト|進捗|途中|一部|先行して|準備|着手|進めて(まいり|いき)|お詫び|申し訳)/;
 function taskDoneSuggestion(p, t) {
@@ -6024,10 +6064,12 @@ function taskDoneSuggestion(p, t) {
     if (m.who !== "me") continue;
     const b = stripQuoted(m.body);
     if (!DONE_REPORT.test(b) || PARTIAL_REPORT.test(b)) continue;
+    if (FUTURE_SEND.test(b) && !/添付/.test(b)) continue;
     // ■見出し or 空行で段落に割り、完了動詞を含む段落とタスク名の重なりを見る
     const secs = b.split(/\n(?=■)|\n\s*\n/);
     const matched = secs.some((sec) =>
-      DONE_REPORT.test(sec) && bigramOverlap(tb, sec) >= 0.4);
+      DONE_REPORT.test(sec) && !FUTURE_SEND.test(sec) && bigramOverlap(tb, sec) >= 0.4)
+      || (!FUTURE_SEND.test(b) && bigramOverlap(tb, b) >= 0.45);
     if (!matched) continue;
     const bounced = msgs.slice(i + 1).some((x) => {
       if (x.who !== "client") return false;
@@ -6039,14 +6081,18 @@ function taskDoneSuggestion(p, t) {
   return null;
 }
 // タスク名→文字2-gram（記号・助詞混じりでも粗く効く）
+// 全角英数→半角。「４件」と「4件」、「ＳＷＯ」と「SWO」を同じ文字として扱う
+function nfkc(x) {
+  return String(x || "").replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+}
 function bigramsOf(title) {
-  const t = String(title || "").replace(/[\s、。・：:／\/「」（）()\[\]【】]/g, "");
+  const t = nfkc(title).replace(/[\s、。・：:／\/「」（）()\[\]【】]/g, "");
   const out = [];
   for (let i = 0; i + 1 < t.length; i++) out.push(t.slice(i, i + 2));
   return Array.from(new Set(out));
 }
 function bigramOverlap(tb, text) {
-  const x = String(text || "");
+  const x = nfkc(text);
   let hit = 0;
   for (const g of tb) if (x.indexOf(g) >= 0) hit++;
   return tb.length ? hit / tb.length : 0;
