@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28o"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28p"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1765,6 +1765,20 @@ export default function App() {
       ...p, tasks: (p.tasks || []).map((t) => t.id !== tid ? t : { ...t, autoDone: null }),
     }));
   // 自動変更を元に戻す（以後この件では提案しない）
+  // 「未返信」で自動変更したあとに返信すれば、その表示はもう用済み。理由が消えたら通知も消す
+  useEffect(() => {
+    const ps = projectsRef.current || [];
+    const stale = ps.filter((p) => {
+      if (!p.autoSt) return false;
+      const at = p.autoSt.at || 0;
+      const mine = (p.msgs || []).filter((m) => m.who === "me" && m.at);
+      const last = mine[mine.length - 1];
+      return !!(last && atToTs(last.at) && atToTs(last.at) >= at - 60 * 1000);
+    });
+    if (!stale.length) return;
+    const ids = new Set(stale.map((p) => p.id));
+    persist(ps.map((p) => ids.has(p.id) ? { ...p, autoSt: null } : p));
+  }, [projects]);
   const undoAutoStatus = (pid) =>
     persist((projectsRef.current || []).map((p) => p.id !== pid || !p.autoSt ? p : {
       ...p, status: p.autoSt.from, statusAt: new Date().toISOString(),
