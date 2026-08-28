@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28n"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28o"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -6312,6 +6312,9 @@ const DONE_REPORT = /(納品(いた)?しました|納品いたします|最終�
 const FUTURE_SEND = /(明日|明後日|来週|来月|後日|追って|改めて|のちほど|後ほど|次回|〜まで|までに)[^。\n]{0,12}(お送り|送付|提出|ご連絡)/;
 // 途中経過のしるし。これが含まれる報告は「まだ作業中」なので完了提案しない
 const PARTIAL_REPORT = /(初校|たたき台|ドラフト|進捗|途中|一部|先行して|準備|着手|進めて(まいり|いき)|お詫び|申し訳)/;
+// 成果物が「返事そのもの」のタスク（回答・返信・連絡・説明）。
+// この種類は「回答しました」とは書かないので、話題が一致する自分の発言があれば済んだとみなす
+const ANSWER_TASK = /(回答|返答|返信|連絡|説明|案内|共有|報告|確認依頼|質問)/;
 function taskDoneSuggestion(p, t) {
   if (!p || !t || t.done || t.sugOff || t.repeat || t.kind === "reply") return null;
   // ① 案件が終わっているのにタスクだけ残っている
@@ -6327,6 +6330,17 @@ function taskDoneSuggestion(p, t) {
   if (!msgs.length) return null;
   const tb = bigramsOf(t.title);
   if (tb.length < 3) return null;
+  // 返事が成果物のタスクは、作成後に同じ話題で自分が発言していれば済んだとみなす
+  if (ANSWER_TASK.test(t.title)) {
+    const born = t.createdAt || 0;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      const ts = atToTs(m.at);
+      if (born && ts && ts < born) break;
+      if (m.who !== "me") continue;
+      if (bigramOverlap(tb, stripQuoted(m.body)) >= 0.25) return { reason: "この件は返信済みでは？" };
+    }
+  }
   const REQ = /(お願い|ください|下さい|いただけ|頂け|でしょうか|ますか|修正|変更|追加|再度|もう一度)/;
   // 相手からの催促（対応状況・目処・リマインド等）が来ている＝何かのボールはこちら。完了提案は全て止める
   const REMIND = /(対応状況|ご対応いかが|進捗いかが|状況いかが|目処|目途|めど|お待ちしております|リマインド|その後いかが|いつ頃(対応|可能)|お時間経って)/;
