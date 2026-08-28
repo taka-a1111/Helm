@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28l"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28m"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -780,7 +780,9 @@ export default function App() {
             if (o && !skip.has(o.key)) {
               const cur = orphans[o.key];
               orphans[o.key] = cur
-                ? { ...cur, count: cur.count + 1, at: (o.at > cur.at ? o.at : cur.at) }
+                ? (o.at > cur.at
+                    ? { ...o, count: cur.count + 1 }                 // 新しい方の本文・URLを採用
+                    : { ...cur, count: cur.count + 1 })
                 : o;
             }
             continue;
@@ -824,7 +826,17 @@ export default function App() {
         const next = (projectsRef.current || []).map((p) => {
           if (p.id === INBOX_ID && orphanList.length) {
             const keep = (p.orphans || []).filter((o) => !orphans[o.key]);
-            const merged = [...keep, ...orphanList].slice(-20);
+            // 旧版が作った「メッセージIDごとの重複」も、ここで相手単位に畳む
+            const fold = {};
+            [...keep, ...orphanList].forEach((o) => {
+              const k = o.kind === "Gmail" ? o.key
+                : (o.kind === "クラウドワークス" ? "cw:" : "lc:") + String(o.name || "").toLowerCase().replace(/[\s\u3000]/g, "");
+              const cur = fold[k];
+              fold[k] = cur
+                ? (o.at > cur.at ? { ...o, key: k, count: (cur.count || 1) + 1 } : { ...cur, count: (cur.count || 1) + 1 })
+                : { ...o, key: k };
+            });
+            const merged = Object.keys(fold).map((k) => fold[k]).slice(-20);
             if (JSON.stringify(merged) !== JSON.stringify(p.orphans || [])) { changed = true; return { ...p, orphans: merged }; }
           }
           const inc = byPid[p.id];
@@ -6626,15 +6638,17 @@ function orphanOf(mail) {
   const name = peelName(mail.client || mail.fromName || (mail.from || "").split("@")[0] || "");
   const at = mail.at || "";
   const subject = String(mail.subject || "").slice(0, 80);
+  const nameKey = String(name || "").toLowerCase().replace(/[\s\u3000]/g, "");
   if (mail.kind === "cw") {
     const u = (raw.match(/https:\/\/crowdworks\.jp\/messages\/\d+/) || [""])[0];
     if (!u) return null;
-    return { key: "cw:" + u.split("/").pop(), kind: "クラウドワークス", name, at, subject, url: u, count: 1 };
+    // URLの数字はメッセージごとに変わるので、相手の名前でまとめる
+    return { key: "cw:" + (nameKey || u.split("/").pop()), kind: "クラウドワークス", name, at, subject, url: u, count: 1 };
   }
   if (mail.kind === "lancers") {
     const u = (raw.match(/https:\/\/www\.lancers\.jp\/mypage\/message\?boardId=\d+/) || [""])[0];
     if (!u) return null;
-    return { key: "lc:" + u.split("=").pop(), kind: "ランサーズ", name, at, subject, url: u, count: 1 };
+    return { key: "lc:" + (nameKey || u.split("=").pop()), kind: "ランサーズ", name, at, subject, url: u, count: 1 };
   }
   // Gmail：ここが一番ノイズが多い。通知・配信・システムメールを落とし、
   // 「人が人に宛てて書いた仕事のメール」だけを未割当として拾う
