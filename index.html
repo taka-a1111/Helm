@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28m"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-28n"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -6686,7 +6686,10 @@ function matchMailToProject(mail, projects) {
   const subj = norm(mail.subject);
   let best = null, bestScore = 0;
   for (const p of projects) {
-    if (p.id === INBOX_ID || p.status === "完了") continue;
+    if (p.id === INBOX_ID) continue;
+    // 完了案件にも当てる（終わった案件に後から連絡が来るのは普通）。
+    // ただし弱い一致では拾わず、スレッドIDや名前の一致など確度の高いものだけを認める
+    const finished = p.status === "完了";
     const names = new Set([(p.company || "")].concat((p.msgs || []).map((m) => m.name || "")));
     let score = 0;
     // スレッドID一致＝確定（CW／ランサーズは相手の表示名が案件名と一致しないのが普通）
@@ -6712,6 +6715,7 @@ function matchMailToProject(mail, projects) {
     // プラットフォーム整合で加点（スレッドID確定分には加点しない）
     if (score > 0 && score < 5 && mail.kind === "cw" && p.platform === "クラウドワークス") score += 1;
     if (score > 0 && score < 5 && mail.kind === "lancers" && p.platform === "ランサーズ") score += 1;
+    if (finished && score < 3) continue;
     if (score > bestScore) { bestScore = score; best = p; }
   }
   return bestScore >= 3 ? best : null;
