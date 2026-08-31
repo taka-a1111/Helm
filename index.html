@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-28p"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-31a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -6683,7 +6683,10 @@ function orphanOf(mail) {
   const addr = String(mail.from || "").toLowerCase();
   if (!addr || mail.dir === "out") return null;
   // 役割アドレス（送信専用・自動送信）は相手ではない
-  if (/^(no-?reply|noreply|donotreply|do-not-reply|info|support|contact|news|notice|notify|announce|admin|system|mail|mailer|help|service|order|orders|order-update|shipment|shipment-tracking|billing|invoice|payment|account|accounts|alert|alerts|notification|notifications|wordpress|webmaster|marketing|press|magazine|newsletter|special|campaign|cs|customer|reply|auto|robot|bot|daemon|postmaster|delivery|track|tracking|member|members|entry|regist|register|survey|event|seminar|jobalert|recruit)[-.@]/i.test(addr)) return null;
+  const local = addr.split("@")[0], domain = addr.split("@")[1] || "";
+  if (/(no-?reply|donotreply|do-not-reply|^info|^support|^contact|news|notice|notify|announce|admin|system|^mail|mailer|help|service|order|shipment|billing|invoice|payment|account|alert|notification|wordpress|webmaster|marketing|press|magazine|newsletter|special|campaign|customer|auto|robot|daemon|postmaster|delivery|track|member|entry|regist|survey|event|seminar|jobalert|recruit|thankyou|thanks|welcome|delivery|mag|bounce|list|club|point|card|bank|shop|store|ec)/i.test(local)) return null;
+  // カード会社・銀行・ECなどの配信ドメイン
+  if (/(vpass|smbc|rakuten-card|jcb|aeon|mufg|amazon|apple|google|paypay|line\.me|netflix|adobe|microsoft|onamae|xserver|sakura|heteml|conoha|mercari|yahoo)\./i.test(domain)) return null;
   // 自分（や自分のサイト）からのメールは相手ではない
   if (/mfa23|infosuccess|believe\.myself/i.test(addr)) return null;
   const body = raw;
@@ -6693,6 +6696,10 @@ function orphanOf(mail) {
   const addressed = /(様|さん)[\s\u3000、,]|^.{0,20}(様|さん)$/m.test(body.slice(0, 400));
   const businesslike = /(お世話になって|はじめまして|初めまして|ご相談|ご依頼|お見積|見積|お仕事|案件|発注|納品|打ち合わせ|打合せ|ご確認いただ|ご連絡いたしました|よろしくお願い)/.test(body.slice(0, 1200));
   if (!addressed || !businesslike) return null;
+  // 自動送信・一斉配信の定型文言、あるいはURLだらけの案内メールは相手とのやり取りではない
+  const BULK = /(送信専用|自動的に送信|自動配信|本メールは|お問い合わせ窓口|ご利用明細|会員番号|お客様番号|カスタマーセンター|心当たりのない場合|利用規約|個人情報保護方針|受付番号|お申込受付|ご利用いただきありがとうございます)/;
+  if (BULK.test(body.slice(0, 2000))) return null;
+  if ((body.match(/https?:\/\//g) || []).length >= 3) return null;
   // エージェントの案件紹介・営業メールは「やり取り中の相手」ではない
   if (/support|jimukyoku|agent|scout|sales|recruit/i.test(addr.split("@")[0])) return null;
   if (/(サポート事務局|運営事務局|カスタマーサポート|お声がけ差し上げ|案件のご紹介|ご紹介したい案件|急募|エージェント|稼働可能|ご登録いただ|案件情報|フォームから回答)/.test(hay)) return null;
