@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-31b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-31c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -129,7 +129,7 @@ const PLATFORM_BADGE = {
   "直契約":           { short: "直", color: "#C0C9D6" },
   "その他":           { short: "他", color: "#717C8C" },
 };
-const STATUSES = ["進行中", "相手待ち", "支払い待ち", "完了"];
+const STATUSES = ["商談中", "進行中", "相手待ち", "支払い待ち", "完了"];
 const REPLIES = ["なし", "要返信", "返信済み", "相手待ち"];
 
 const TASK_LANES = [
@@ -172,6 +172,7 @@ const REPLY_META = {
   "なし":     { color: "#8B95A5", bg: "#14171C", label: "—" },
 };
 const STATUS_META = {
+  "商談中":   "#C0C9D6",
   "進行中":   "#C0C9D6",
   "相手待ち": "#C0C9D6",
   "支払い待ち": "#C0C9D6",
@@ -428,7 +429,7 @@ function laneOf(project, task) {
     }
   }
   // 日付なしタスク：案件ステータスに従う
-  if (project.status === "相手待ち") return "waiting";
+  if (project.status === "相手待ち" || project.status === "商談中") return "waiting";
   if (project.status === "支払い待ち") return "payment";
   // 日付なしタスク：明後日以降へ（案件の「いつやる」は廃止済みのため引き継がない）
   return "later";
@@ -454,7 +455,7 @@ function projectInLane(p, lane) {
 function projectFallbackLane(p) {
   if (!p || p.id === INBOX_ID || p.status === "完了") return null;
   if ((p.tasks || []).some((t) => !t.done)) return null; // 未完了タスクがあればタスク側で判定
-  if (p.status === "相手待ち") return "waiting";
+  if (p.status === "相手待ち" || p.status === "商談中") return "waiting";
   if (p.status === "支払い待ち") return "payment";
   const n = daysUntil(p.deadline); // 案件startは廃止済み。判定は納期のみ（カレンダー表示と一致させる）
   if (n !== null && n <= 0) return "today";
@@ -1273,7 +1274,7 @@ export default function App() {
   }, []);
 
   // 据え置き：変更前後でレーン/並び順位が変わった項目を「元の位置」に一時固定（ビュー切替で解除）
-  const statusRankH = (p) => (p.status === "相手待ち" ? 1 : p.status === "支払い待ち" ? 2 : 0);
+  const statusRankH = (p) => (p.status === "相手待ち" ? 1 : p.status === "支払い待ち" ? 2 : p.status === "商談中" ? 3 : 0);
   const computeHeld = (prev, next) => {
     const prevById = {}; prev.forEach((p) => (prevById[p.id] = p));
     setHeld((h) => {
@@ -1728,11 +1729,12 @@ export default function App() {
     const o = inbox && (inbox.orphans || []).find((x) => x.key === key);
     if (!o) return;
     const platform = o.kind === "クラウドワークス" ? "クラウドワークス" : o.kind === "ランサーズ" ? "ランサーズ" : "直契約";
+    // 見知らぬ相手からの連絡はたいてい契約前の打診なので、まず「商談中」で作る
     const np = {
       id: uid(), company: o.name || o.subject || "新規案件", platform, work: "", reward: 0,
       status: "進行中", reply: "なし", deadline: "", start: "", note: "", summary: "",
       received: "", replyDraft: "", repliedAt: null, replyUrl: "", replyHistory: [], tasks: [],
-      status: "進行中", createdAt: Date.now(),
+      status: "商談中", createdAt: Date.now(),
       links: o.url ? [{ id: uid(), label: o.kind === "ランサーズ" ? "ランサーズ" : "CW", url: o.url }] : [],
       msgs: o.kind === "Gmail"
         ? [{ id: uid(), who: "client", name: o.name, at: o.at, body: `【${o.subject}】`, partial: true, src: "gmail" }]
@@ -2298,7 +2300,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
   const doneList = (allProjects || projects).filter((p) => p.id !== INBOX_ID && p.status === "完了");
   const [showDone, setShowDone] = useState(false);
   // ステータス順を最優先：進行中→相手待ち→支払い待ち（各グループ内は上のソート順を維持）
-  const statusRank = (p) => (p.status === "相手待ち" ? 1 : p.status === "支払い待ち" ? 2 : 0);
+  const statusRank = (p) => (p.status === "相手待ち" ? 1 : p.status === "支払い待ち" ? 2 : p.status === "商談中" ? 3 : 0);
   const heldRankOf = (p) => (heldRank && heldRank[p.id] !== undefined ? heldRank[p.id] : statusRank(p));
   cardList = [...cardList].sort((a, b) => heldRankOf(a) - heldRankOf(b));
 
@@ -6429,6 +6431,8 @@ function isNewRequestMsg(body) {
 
 function statusSuggestion(p) {
   if (!p || p.id === INBOX_ID) return null;
+  // 契約前は自分で判断したい段階なので、ステータスの提案はしない（返信アシストは通常どおり働く）
+  if (p.status === "商談中") return null;
   if (p.status === "完了") {
     // 支払いも済んで終わった案件は、新しい依頼が来ない限り静かにしておく
     const all = (p.msgs || []).filter((m) => (m.who === "me" || m.who === "client") && m.at);
