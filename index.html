@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-31a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-08-31b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -2673,6 +2673,14 @@ function OrphanCard({ o, projects, onAssign, onNew, onIgnore }) {
       </div>
       {o.subject && <div style={S.intakeItemNote}>{o.subject}</div>}
       <div style={S.intakeItemNote}>Helmに未登録のやり取りです</div>
+      {(o.url || o.kind === "Gmail") && (
+        <a style={S.orphanOpen}
+          href={o.url || ("https://mail.google.com/mail/u/0/#search/" + encodeURIComponent(String(o.key || "").replace(/^gm:/, "")))}
+          target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+          <ExternalLink size={13} strokeWidth={2.4} />
+          {o.kind === "Gmail" ? "Gmailで開く" : `${o.kind}で開く`}
+        </a>
+      )}
       {pick ? (
         <div style={S.candRow}>
           {projects.map((p) => (
@@ -7658,6 +7666,7 @@ const S = {
   laneBar: { display: "flex", alignItems: "center", gap: 9 },
   laneBarTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 15.5, marginRight: "auto" },
   orphanCard: { border: "1px solid rgba(217,162,59,0.5)", background: "rgba(217,162,59,0.07)", borderRadius: 12, padding: 12, display: "grid", gap: 8, marginBottom: 12 },
+  orphanOpen: { display: "inline-flex", alignItems: "center", gap: 5, alignSelf: "flex-start", border: `1px solid ${C.line}`, borderRadius: 8, background: C.panel, color: C.accent, fontSize: 13, fontWeight: 700, padding: "6px 11px", textDecoration: "none" },
   orphanNew: { border: `1px solid ${C.line}`, borderRadius: 9, background: C.panel, color: C.ink, fontSize: 13.5, fontWeight: 700, padding: "9px 14px", cursor: "pointer" },
   autoCard: { border: `1px solid ${C.line}`, background: C.panel, borderRadius: 12, padding: 12, display: "grid", gap: 8, marginBottom: 12 },
   newChip: { display: "inline-block", marginRight: 6, fontSize: 10.5, fontWeight: 800, color: C.accent, background: "rgba(107,138,255,0.16)", borderRadius: 5, padding: "1px 5px", verticalAlign: "1px" },
