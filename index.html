@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-08-31d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-09a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -816,7 +816,8 @@ export default function App() {
             const hay = `${mail.from || ""} ${mail.fromName || ""} ${mail.subject || ""} ${(mail.body || "").slice(0, 1500)}`;
             const isBulk = /no-?reply|noreply|newsletter|magazine|mailmag|info@|news@|karte\.io|mailchimp|sendgrid|benchmark|配信停止|購読|メールマガジン|プレイリスト|今週の\d+本|編集部厳選/i.test(hay);
             if (isBulk) continue;
-            entry = { who: mail.dir === "out" ? "me" : "client", name: mail.fromName || mail.from || "", at: mail.at || "",
+            const selfMail = mail.dir === "out" || SELF_NAME.test(`${mail.from || ""} ${mail.fromName || ""}`);
+            entry = { who: selfMail ? "me" : "client", name: mail.fromName || mail.from || "", at: mail.at || "",
               body: (mail.subject ? `【${mail.subject}】\n` : "") + (mail.body || ""), partial: false, src: "gmail" };
           }
           if (entry && entry.body) (byPid[p.id] = byPid[p.id] || []).push(entry);
@@ -6663,6 +6664,10 @@ const liveTsqItems = (p) => (p && p.tsq && p.tsq.items ? p.tsq.items.filter((it)
 // 汎用語（プラットフォーム名・事務局・no-reply等）は照合キーにしない。
 // これを許すと「CW通知が1件でも入っている別案件」に、無関係なクライアントの通知が吸い寄せられる。
 const GENERIC_NAME = /^(クラウドワークス|crowdworks|ランサーズ|lancers|ココナラ|coconala|チャットワーク|chatwork|gmail|google|事務局|運営|運営事務局|サポート|support|info|contact|noreply|no-reply|donotreply|admin|system|mail|message|メッセージ|通知|お知らせ|相手|クライアント)$/;
+// 自分（屋号・自分のアドレス・自分の名前）。相手の識別には使えないので照合から外す
+const SELF_NAME = /(mfa23|infosuccess|インフォサクセス|believe\.myself|高崎|takasaki|たかさき)/i;
+// 発注システム等の自動送信名も、相手の識別には向かない
+const SYSTEM_NAME = /(発注システム|自動送信|システム|notification|notify)/i;
 // 「【クラウドワークス】sugi_barcelona さん」→「sugi_barcelona」
 const peelName = (s) => String(s || "").replace(/[【\[][^】\]]*[】\]]/g, " ").replace(/[\s　]*(さん|様)$/, "").trim();
 // CW／ランサーズのスレッドID（案件ごとに固有）。一致すればその案件で確定できる
@@ -6733,7 +6738,8 @@ function matchMailToProject(mail, projects) {
   const mailFold = fold((mail.subject || "") + " " + String(mail.body || mail.excerpt || "").slice(0, 1000));
   const keys = [mail.client, mail.fromName, (mail.from || "").split("@")[0]]
     .map((x) => norm(peelName(x)))
-    .filter((x) => x.length >= 2 && !GENERIC_NAME.test(x) && !/crowdworks|lancers|coconala|chatwork|no-?reply|事務局/.test(x));
+    .filter((x) => x.length >= 2 && !GENERIC_NAME.test(x) && !SELF_NAME.test(x) && !SYSTEM_NAME.test(x)
+      && !/crowdworks|lancers|coconala|chatwork|no-?reply|事務局/.test(x));
   const mailTh = threadKeys((mail.body || "") + " " + (mail.excerpt || ""));
   const subj = norm(mail.subject);
   let best = null, bestScore = 0;
@@ -6758,6 +6764,7 @@ function matchMailToProject(mail, projects) {
     for (const raw of names) {
       const n = norm(peelName(raw));
       if (n.length < 2 || GENERIC_NAME.test(n)) continue;
+      if (SELF_NAME.test(n) || SYSTEM_NAME.test(n)) continue; // 自分・システム名では案件を特定できない
       for (const k of keys) { if (k && (n.includes(k) || k.includes(n))) score = Math.max(score, 3); }
       if (subj && n.length >= 3 && subj.includes(n)) score = Math.max(score, 2);
     }
