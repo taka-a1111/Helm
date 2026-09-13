@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-13a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-13b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -412,6 +412,27 @@ const replyTasksOf = (p) => (p.tasks || []).filter((t) => t.kind === "reply" && 
 const taskJudgeDate = (t) => t.start || t.due || "";
 // タスクがToDoのどのレーンに入るか：タスクのkind（waiting/payment）が最優先、
 // 振り分け：タスクのkind → タスク自身の日付 → 案件ステータス → 案件の「いつやる」継承 → 明後日以降
+// タスク名から「相手のボール」を読み取る。明示的に指定していなくても分かるようにする
+const WAIT_TITLE = /(待ち|入金確認|着金確認|返信待|回答待|承認待|検収|届き次第|連絡待|確認依頼中|レビュー待|返答待|支払|請求書の?(提出|送付)後)/;
+// このタスクのボールはどちらにあるか。"them" = 相手、"me" = 自分
+function taskBall(project, task) {
+  if (!task) return "me";
+  if (task.kind === "waiting" || task.kind === "payment") return "them";
+  if (WAIT_TITLE.test(task.title || "")) return "them";
+  // 案件が相手待ちでも、タスク単位では自分の作業が混じる（例：相手待ち案件の「9月記事提出」）。
+  // 案件のステータスからは推測せず、タスクの種別と名前だけで判断する
+  return "me";
+}
+// 案件の未完了タスクを「自分／相手」で数える
+function ballCounts(project) {
+  let me = 0, them = 0;
+  ((project && project.tasks) || []).forEach((t) => {
+    if (t.done) return;
+    taskBall(project, t) === "them" ? them++ : me++;
+  });
+  return { me, them };
+}
+
 function laneOf(project, task) {
   if (!project) return "later";
   if (project.status === "完了") return null;
@@ -2874,6 +2895,12 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
             {sug && sug.mark === "ok" && <Check size={13} color="#51CF66" strokeWidth={3} style={{ flexShrink: 0 }} />}
             {sug && sug.mark === "warn" && <AlertTriangle size={13} color="#D9A23B" strokeWidth={2.6} style={{ flexShrink: 0 }} />}
             {sug && sug.mark === "todo" && <Hourglass size={13} color={C.accent} strokeWidth={2.6} style={{ flexShrink: 0 }} title="こちらの作業が残っています" />}
+        {(() => { const b = ballCounts(p); if (!b.me && !b.them) return null; return (
+          <span style={S.ballCount} title="未完了タスクの内訳（自分のボール／相手のボール）">
+            {b.me > 0 && <span style={S.ballCountMe}>自分{b.me}</span>}
+            {b.them > 0 && <span style={S.ballCountThem}>相手{b.them}</span>}
+          </span>
+        ); })()}
             {sug && sug.mark === "unknown" && <span style={S.trustUnknown} title="ログ未登録または古いため判定できません">?</span>}
             {liveTsqItems(p).length > 0 && <ListPlus size={14} color="#D9A23B" strokeWidth={2.6} style={{ flexShrink: 0 }} title="タスク候補あり（開いて確認）" />}
           </span>
@@ -2957,10 +2984,9 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
                 <span style={S.cardTaskTitle}>
                   {t.repeat && <Repeat size={13} color={C.accent} strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-2px" }} />}
                   {t.title || "（無題）"}
-                  {t.kind === "waiting" && <Hourglass size={13} color="#D9A23B" strokeWidth={2.4} style={{ marginLeft: 6, verticalAlign: "-2px" }} />}
-                  {t.kind === "payment" && <Coins size={13} color="#51CF66" strokeWidth={2.4} style={{ marginLeft: 6, verticalAlign: "-2px" }} />}
-                  {t.kind !== "waiting" && t.kind !== "payment" && p.status === "相手待ち" && <Hourglass size={13} color="#D9A23B" strokeWidth={2.4} style={{ marginLeft: 6, verticalAlign: "-2px" }} />}
-                  {t.kind !== "waiting" && t.kind !== "payment" && p.status === "支払い待ち" && <Coins size={13} color="#51CF66" strokeWidth={2.4} style={{ marginLeft: 6, verticalAlign: "-2px" }} />}
+                  {t.kind === "payment"
+                    ? <span style={S.ballPay}>入金待ち</span>
+                    : taskBall(p, t) === "them" && <span style={S.ballThem}>相手待ち</span>}
                 </span>
                 {t.isAuto && !t.done && <span style={S.newChip}>{t.isAuto === "append" ? "追記" : "NEW"}</span>}
                 <TaskMetaChips t={t} onMenu={(e) => onDateMenu && onDateMenu(e, p.id, t)} />
@@ -3947,10 +3973,9 @@ function TaskCard({ t, lane, onToggle, onWip, onOpen, onOpenTask, onEditTask, on
         {t.isAuto && !t.done && <span style={S.newChip}>{t.isAuto === "append" ? "追記" : "NEW"}</span>}
           {t.repeat && <Repeat size={13} color={C.accent} strokeWidth={2.6} style={{ marginRight: 5, verticalAlign: "-1px" }} />}
           {t.title || "（無題）"}
-          {t.kind === "waiting" && <Hourglass size={13} color="#D9A23B" strokeWidth={2.4} style={{ marginLeft: 6, verticalAlign: "-1px" }} />}
-          {t.kind === "payment" && <Coins size={13} color="#51CF66" strokeWidth={2.4} style={{ marginLeft: 6, verticalAlign: "-1px" }} />}
-          {t.kind !== "waiting" && t.kind !== "payment" && t.project.status === "相手待ち" && <Hourglass size={13} color="#D9A23B" strokeWidth={2.4} style={{ marginLeft: 6, verticalAlign: "-1px" }} />}
-          {t.kind !== "waiting" && t.kind !== "payment" && t.project.status === "支払い待ち" && <Coins size={13} color="#51CF66" strokeWidth={2.4} style={{ marginLeft: 6, verticalAlign: "-1px" }} />}
+          {t.kind === "payment"
+            ? <span style={S.ballPay}>入金待ち</span>
+            : taskBall(t.project, t) === "them" && <span style={S.ballThem}>相手待ち</span>}
         </div>
         {t.kind === "reply" && !t.done && (
           <div style={S.tcardMeta}>
@@ -7699,6 +7724,11 @@ const S = {
   orphanOpen: { display: "inline-flex", alignItems: "center", gap: 5, alignSelf: "flex-start", border: `1px solid ${C.line}`, borderRadius: 8, background: C.panel, color: C.accent, fontSize: 13, fontWeight: 700, padding: "6px 11px", textDecoration: "none" },
   orphanNew: { border: `1px solid ${C.line}`, borderRadius: 9, background: C.panel, color: C.ink, fontSize: 13.5, fontWeight: 700, padding: "9px 14px", cursor: "pointer" },
   autoCard: { border: `1px solid ${C.line}`, background: C.panel, borderRadius: 12, padding: 12, display: "grid", gap: 8, marginBottom: 12 },
+  ballThem: { display: "inline-block", marginLeft: 6, fontSize: 10.5, fontWeight: 800, color: "#D9A23B", background: "rgba(217,162,59,0.16)", borderRadius: 5, padding: "1px 5px", verticalAlign: "1px", whiteSpace: "nowrap" },
+  ballPay: { display: "inline-block", marginLeft: 6, fontSize: 10.5, fontWeight: 800, color: "#8FBF9A", background: "rgba(81,207,102,0.16)", borderRadius: 5, padding: "1px 5px", verticalAlign: "1px", whiteSpace: "nowrap" },
+  ballCount: { display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 },
+  ballCountMe: { fontSize: 10.5, fontWeight: 800, color: C.accent, background: "rgba(107,138,255,0.16)", borderRadius: 5, padding: "1px 6px" },
+  ballCountThem: { fontSize: 10.5, fontWeight: 800, color: "#D9A23B", background: "rgba(217,162,59,0.16)", borderRadius: 5, padding: "1px 6px" },
   newChip: { display: "inline-block", marginRight: 6, fontSize: 10.5, fontWeight: 800, color: C.accent, background: "rgba(107,138,255,0.16)", borderRadius: 5, padding: "1px 5px", verticalAlign: "1px" },
   intakeCard: { border: `1px solid ${C.accent}`, background: "rgba(107,138,255,0.08)", borderRadius: 12, padding: 12, display: "grid", gap: 8, marginBottom: 12 },
   intakeHead: { display: "flex", alignItems: "center", gap: 7 },
