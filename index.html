@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-13g"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-13h"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -2565,7 +2565,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
                         <span>{g.label}</span>
                         <span style={{ ...S.focusGroupCount, color: g.color }}>{g.items.length}</span>
                       </div>
-                      {g.items.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onUpdateTask={onUpdateTask} onEditTask={onEditTask} onToggleTask={onToggleTask} onWipTask={onWipTask} onToggleProject={onToggleProject} onDragHandle={startDrag} dragging={dragId === p.id} dragActive={dragId !== null} onTaskDrag={startTaskDrag} taskDragId={dragTaskId} onSetStatus={onSetStatus} onOpenReply={onOpenReply} onNoReply={onNoReply} onArrow={arrowMove} onAckSug={onAckSug} onAckTaskSug={onAckTaskSug} onUndoAutoSt={onUndoAutoSt} onAckAutoSt={onAckAutoSt} onDateMenu={(e, pid, t) => setDateMenu({ x: e.clientX, y: e.clientY, pid, tid: t.id, cur: taskJudgeDate(t) || "" })} />)}
+                      {g.items.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onUpdateTask={onUpdateTask} onEditTask={onEditTask} onToggleTask={onToggleTask} onWipTask={onWipTask} onToggleProject={onToggleProject} dragging={false} dragActive={false} onTaskDrag={startTaskDrag} taskDragId={dragTaskId} onSetStatus={onSetStatus} onOpenReply={onOpenReply} onNoReply={onNoReply} onArrow={arrowMove} onAckSug={onAckSug} onAckTaskSug={onAckTaskSug} onUndoAutoSt={onUndoAutoSt} onAckAutoSt={onAckAutoSt} onDateMenu={(e, pid, t) => setDateMenu({ x: e.clientX, y: e.clientY, pid, tid: t.id, cur: taskJudgeDate(t) || "" })} />)}
                     </div>
                   );
                 });
@@ -3534,7 +3534,7 @@ function TasksView({ projects, onToggle, onWip, onOpen, onOpenTask, onEditTask, 
     <div key={g.project.id} style={S.taskGroup} data-gpid={g.project.id}>
       <GroupHead project={g.project} lane={lane}
         dragActive={dragTid !== null || dragGid !== null}
-        onStartDrag={startGroupDrag} onOpen={onOpen} onToggleProject={onToggleProject}
+        onStartDrag={null} onOpen={onOpen} onToggleProject={onToggleProject}
         onArrow={groupArrow}
         count={g.tasks.length} folded={folded.has(g.project.id)}
         onFold={() => toggleFold(g.project.id)} />
