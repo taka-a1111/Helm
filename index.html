@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-13f"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-13g"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -2283,10 +2283,38 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
   let cardList = projects.filter((p) => p.id !== INBOX_ID && p.status !== "完了");
   const doneList = (allProjects || projects).filter((p) => p.id !== INBOX_ID && p.status === "完了");
   const [showDone, setShowDone] = useState(false);
-  // ステータス順を最優先：進行中→相手待ち→支払い待ち（各グループ内は上のソート順を維持）
+  // 並び順は「自分が手を動かすもので、いつやるかが近い順」。
+  // 金額順は動きが出ず、納期順だと相手待ちまで上に来てしまうため、自分のボールを基準にする。
   const statusRank = (p) => (p.status === "相手待ち" ? 1 : p.status === "支払い待ち" ? 2 : p.status === "商談中" ? 3 : 0);
-  const heldRankOf = (p) => (heldRank && heldRank[p.id] !== undefined ? heldRank[p.id] : statusRank(p));
-  cardList = [...cardList].sort((a, b) => heldRankOf(a) - heldRankOf(b));
+  const urgencyOf = (p) => {
+    let day = Infinity, n = 0;
+    (p.tasks || []).forEach((t) => {
+      if (t.done || taskBall(p, t) !== "me") return;
+      n++;
+      const d = daysUntil(t.start || t.due);
+      if (d !== null && d < day) day = d;
+    });
+    // 自分の作業が無い案件（相手待ちだけ）は下のグループへ
+    return { group: n ? 0 : 1, day, n };
+  };
+  const cmpProject = (a, b) => {
+    const ua = urgencyOf(a), ub = urgencyOf(b);
+    if (ua.group !== ub.group) return ua.group - ub.group;             // 自分の作業がある案件を先に
+    if (ua.group === 1) {                                              // 相手待ちだけの案件同士
+      const s2 = statusRank(a) - statusRank(b);
+      if (s2) return s2;
+      return (Number(b.reward) || 0) - (Number(a.reward) || 0);
+    }
+    if (ua.day !== ub.day) return ua.day - ub.day;                     // 期限超過→今日→明日…の順
+    if (ua.n !== ub.n) return ub.n - ua.n;                             // 同じ日なら件数が多い順
+    return (Number(b.reward) || 0) - (Number(a.reward) || 0);
+  };
+  const heldRankOf = (p) => (heldRank && heldRank[p.id] !== undefined ? heldRank[p.id] : null);
+  cardList = [...cardList].sort((a, b) => {
+    const ha = heldRankOf(a), hb = heldRankOf(b);
+    if (ha !== null && hb !== null && ha !== hb) return ha - hb;       // ドラッグ直後は位置を据え置く
+    return cmpProject(a, b);
+  });
 
   const minDue = (p) => { const a = dueDaysList(p); return a.length ? Math.min(...a) : Infinity; };
   const lists = {
