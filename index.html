@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-13j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-13k"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1580,6 +1580,34 @@ export default function App() {
       || ps.find((p) => p.id !== INBOX_ID && p.status !== "完了" && titleSim(name, p.company) >= 0.75)
       || null;
   };
+  // 受信箱の行から新しい案件を作る。ステータス・報酬・プラットフォーム・リンクも指定どおりに入れる
+  const newFromIntake = (row) => {
+    const pl = (row && row.payload) || {};
+    const ps = projectsRef.current || [];
+    const name = String(row.project || "").trim();
+    if (!name) return;
+    const st = STATUSES.indexOf(String(pl.status || "")) >= 0 ? String(pl.status) : "商談中";
+    const pf = Object.prototype.hasOwnProperty.call(PLATFORMS, String(pl.platform || "")) ? String(pl.platform) : "直契約";
+    const np = {
+      id: uid(), company: name, platform: pf, work: "",
+      reward: Number(pl.reward) > 0 ? Number(pl.reward) : 0,
+      status: st, statusAt: new Date().toISOString(), createdAt: Date.now(),
+      reply: "なし", deadline: "", start: "", summary: "",
+      note: String(pl.note || "").trim(),
+      received: "", replyDraft: "", repliedAt: null, replyUrl: "", replyHistory: [], msgs: [],
+      links: (pl.links || []).filter((l) => l && /^https?:\/\//.test(l.url || ""))
+        .map((l) => ({ id: uid(), label: String(l.label || "").slice(0, 20), url: l.url })),
+      tasks: (pl.add || []).filter((a) => a && a.title).map((a) => ({
+        id: uid(), title: String(a.title).slice(0, 60), done: false, note: String(a.note || ""),
+        due: /^\d{4}-\d{2}-\d{2}$/.test(a.due || "") ? a.due : "",
+        start: /^\d{4}-\d{2}-\d{2}$/.test(a.start || "") ? a.start : dStr(0),
+        lane: "today", kind: "task", repeat: null, links: [], wip: false, doneAt: null,
+        sugOff: false, createdAt: Date.now(), isAuto: "new", autoAt: Date.now(),
+      })),
+    };
+    persist([...ps, np]);
+    closeIntake(row.id);
+  };
   const applyIntake = (row) => {
     const pl = (row && row.payload) || {};
     const ps = projectsRef.current || [];
@@ -2043,7 +2071,7 @@ export default function App() {
                 <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />
               </div>
               {focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
-              {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} intakes={intakes} onApplyIntake={applyIntake} onDropIntake={closeIntake} orphans={(projects.find((p) => p.id === INBOX_ID) || {}).orphans || []} onAssignOrphan={assignOrphan} onNewOrphan={newFromOrphan} onIgnoreOrphan={ignoreOrphan} onClearAuto={clearAutoMarks} money={money} moneyOpen={moneyOpen} heldRank={held.projRank} />}
+              {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} intakes={intakes} onApplyIntake={applyIntake} onNewIntake={newFromIntake} onDropIntake={closeIntake} orphans={(projects.find((p) => p.id === INBOX_ID) || {}).orphans || []} onAssignOrphan={assignOrphan} onNewOrphan={newFromOrphan} onIgnoreOrphan={ignoreOrphan} onClearAuto={clearAutoMarks} money={money} moneyOpen={moneyOpen} heldRank={held.projRank} />}
               {focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             </div>
             <div style={S.triCol}>
@@ -2057,7 +2085,7 @@ export default function App() {
           <>
             {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
             {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
-            {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} intakes={intakes} onApplyIntake={applyIntake} onDropIntake={closeIntake} orphans={(projects.find((p) => p.id === INBOX_ID) || {}).orphans || []} onAssignOrphan={assignOrphan} onNewOrphan={newFromOrphan} onIgnoreOrphan={ignoreOrphan} onClearAuto={clearAutoMarks} money={money} moneyOpen={moneyOpen} heldRank={held.projRank} />}
+            {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} intakes={intakes} onApplyIntake={applyIntake} onNewIntake={newFromIntake} onDropIntake={closeIntake} orphans={(projects.find((p) => p.id === INBOX_ID) || {}).orphans || []} onAssignOrphan={assignOrphan} onNewOrphan={newFromOrphan} onIgnoreOrphan={ignoreOrphan} onClearAuto={clearAutoMarks} money={money} moneyOpen={moneyOpen} heldRank={held.projRank} />}
             {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
           </>
@@ -2151,7 +2179,7 @@ export default function App() {
 /* ============================================================
    フォーカス（ダッシュボード）
    ============================================================ */
-function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onWipTask, onToggleProject, onReorderTask, onMoveTask, onSetStatus, onOpenReply, onNoReply, onAckSug, onAckTaskSug, intakes, onApplyIntake, onDropIntake, onClearAuto, orphans, onAssignOrphan, onNewOrphan, onIgnoreOrphan, money, moneyOpen, heldRank }) {
+function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTask, onUpdateTask, onReorder, onReorderCommit, onEditTask, onToggleTask, onWipTask, onToggleProject, onReorderTask, onMoveTask, onSetStatus, onOpenReply, onNoReply, onAckSug, onAckTaskSug, intakes, onApplyIntake, onNewIntake, onDropIntake, onClearAuto, orphans, onAssignOrphan, onNewOrphan, onIgnoreOrphan, money, moneyOpen, heldRank }) {
   const [openCard, setOpenCard] = useState(null);
   const [openMsg, setOpenMsg] = useState(null);
   const [addingTop, setAddingTop] = useState(false); // 右上「＋追加」（今日のタスクとして追加）
@@ -2286,7 +2314,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
   return (
     <div style={S.colWrap}>
       {(intakes || []).map((row) => (
-        <IntakeCard key={row.id} row={row} onApply={onApplyIntake} onDrop={onDropIntake} />
+        <IntakeCard key={row.id} row={row} onApply={onApplyIntake} onNew={onNewIntake} onDrop={onDropIntake} />
       ))}
       {(orphans || []).map((o) => (
         <OrphanCard key={o.key} o={o} projects={(allProjects || projects).filter((p) => p.id !== INBOX_ID)}
@@ -2692,7 +2720,7 @@ function AutoAddedCard({ projects, onClear }) {
   );
 }
 // Claude（別スレッド）から送られてきた反映内容の確認カード
-function IntakeCard({ row, onApply, onDrop }) {
+function IntakeCard({ row, onApply, onNew, onDrop }) {
   const pl = row.payload || {};
   const add = pl.add || [], done = pl.done || [];
   return (
@@ -2718,6 +2746,7 @@ function IntakeCard({ row, onApply, onDrop }) {
           <div style={S.intakeItemTitle}>{t}</div>
         </div>
       ))}
+      <div style={S.intakeItemNote}>この案件名はHelmに登録されていません</div>
       {pl.status && (
         <div style={S.intakeItem}>
           <span style={S.intakeTag}>状態</span>
@@ -2735,7 +2764,8 @@ function IntakeCard({ row, onApply, onDrop }) {
       ))}
       {pl.note && <div style={S.intakeItemNote}>メモ：{pl.note}</div>}
       <div style={S.intakeBtns}>
-        <button style={S.intakeApply} onClick={() => onApply(row)}>反映する</button>
+        <button style={S.intakeApply} onClick={() => onApply(row)}>既存の案件へ</button>
+        <button style={S.orphanNew} onClick={() => onNew(row)}>新規案件として登録</button>
         <button style={S.intakeDrop} onClick={() => onDrop(row.id)}>破棄</button>
       </div>
     </div>
