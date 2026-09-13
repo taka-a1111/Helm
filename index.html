@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-13l"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-13m"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -573,9 +573,9 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const wide = useWideScreen(); // PCではタスク画面を横幅いっぱいに広げる
-  const triPane = useWideScreen(1200); // PC：案件・タスク・カレンダーの3画面を横並び表示
+  const triPane = useWideScreen(1200); // PC：案件とタスクを横並び表示
   const [paneLane, setPaneLane] = useState("today"); // 3画面表示のタスク列で選択中のレーン
-  const VIEWS = ["focus", "calendar"];
+  const VIEWS = ["focus"];
   useEffect(() => { try { window.scrollTo(0, 0); const m = document.querySelector("main"); if (m) m.scrollTop = 0; } catch {} }, [view]);
   // 追従バー（フィルタチップ）をヘッダー直下に貼り付けるため、ヘッダー実高を CSS 変数に反映
   useEffect(() => {
@@ -700,7 +700,7 @@ export default function App() {
       const t = sp.get("text") || sp.get("title") || "";
       const u = sp.get("url") || "";
       const tab = sp.get("tab");
-      if (tab === "focus" || tab === "calendar") setView(tab);
+      if (tab === "focus") setView(tab);
       else if (tab === "tasks") { setView("focus"); setFocusFilter("today"); }
       if (t || u) {
         setShareIntent({ text: t, url: u });
@@ -2046,7 +2046,6 @@ export default function App() {
           </button>
           {!triPane && [
             ["focus", "フォーカス", LayoutDashboard],
-            ["calendar", "カレンダー", CalendarDays],
           ].map(([k, label, Icon]) => (
             <button key={k} onClick={() => go(k)} title={label} aria-label={label}
               style={{ ...S.tab, ...(wide ? {} : S.tabSp), ...(view === k ? S.tabOn : {}) }}>
@@ -2073,16 +2072,12 @@ export default function App() {
             <div style={S.triCol}>
               <TasksView forceNarrow projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={paneLane} setActiveLane={setPaneLane} heldLane={held.taskLane} />
             </div>
-            <div style={S.triCol}>
-              <CalendarView projects={projects} onOpen={openProject} forceNarrow />
-            </div>
           </div>
         ) : (
           <>
             {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
             {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} intakes={intakes} onApplyIntake={applyIntake} onNewIntake={newFromIntake} onDropIntake={closeIntake} orphans={(projects.find((p) => p.id === INBOX_ID) || {}).orphans || []} onAssignOrphan={assignOrphan} onNewOrphan={newFromOrphan} onIgnoreOrphan={ignoreOrphan} onClearAuto={clearAutoMarks} money={money} moneyOpen={moneyOpen} heldRank={held.projRank} />}
             {view === "focus" && focusFilter !== "all" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
-            {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
           </>
         )}
       </main>
@@ -5095,132 +5090,6 @@ function SettingsModal({ onClose, sync, syncState, onSaveSync, onSyncPush, onSyn
 /* ============================================================
    カレンダービュー（タスク期限・案件納期を月表示）
    ============================================================ */
-function CalendarView({ projects, onOpen, forceNarrow }) {
-  const wide = useWideScreen() && !forceNarrow;
-  const now = new Date();
-  const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() });
-  const pad = (n) => String(n).padStart(2, "0");
-  const key = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
-  const todayKey = key(now.getFullYear(), now.getMonth(), now.getDate());
-  const [selected, setSelected] = useState(todayKey);
-
-  const byDate = {};
-  const push = (k, item) => { (byDate[k] = byDate[k] || []).push(item); };
-  projects.forEach((p) => {
-    (p.tasks || []).forEach((t) => {
-      if (t.done) return;
-      if (t.kind === "reply") { if (t.due) push(t.due, { kind: "task", label: t.title, color: C.accent, project: p }); return; }
-      const dates = [...new Set([t.start, t.due].filter(Boolean))];
-      dates.forEach((dk) => push(dk, { kind: "task", label: t.title, color: C.accent, project: p }));
-    });
-    if (p.deadline && p.id !== INBOX_ID && p.status !== "完了") push(p.deadline, { kind: "deadline", label: "納期", color: "#F28B82", project: p });
-  });
-
-  const startDow = new Date(ym.y, ym.m, 1).getDay();
-  const daysInMonth = new Date(ym.y, ym.m + 1, 0).getDate();
-  const cells = [];
-  for (let i = 0; i < startDow; i++) cells.push(null);
-  for (let dd = 1; dd <= daysInMonth; dd++) cells.push(dd);
-  while (cells.length % 7 !== 0) cells.push(null);
-
-  const prevM = () => setYm((s) => (s.m === 0 ? { y: s.y - 1, m: 11 } : { y: s.y, m: s.m - 1 }));
-  const nextM = () => setYm((s) => (s.m === 11 ? { y: s.y + 1, m: 0 } : { y: s.y, m: s.m + 1 }));
-  const goToday = () => { setYm({ y: now.getFullYear(), m: now.getMonth() }); setSelected(todayKey); };
-
-  const WD = ["日", "月", "火", "水", "木", "金", "土"];
-  const selItems = byDate[selected] || [];
-  const sd = selected ? new Date(selected + "T00:00:00") : null;
-  const selLabel = sd ? `${sd.getMonth() + 1}月${sd.getDate()}日（${WD[sd.getDay()]}）` : "";
-
-  // 横スワイプで月を切り替え
-  const sw = useRef({ x: 0, y: 0 });
-  const onCalTouchStart = (e) => { const t = e.touches[0]; sw.current = { x: t.clientX, y: t.clientY }; };
-  const onCalTouchEnd = (e) => {
-    const t = (e.changedTouches && e.changedTouches[0]); if (!t) return;
-    const dx = t.clientX - sw.current.x, dy = t.clientY - sw.current.y;
-    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.3) { e.stopPropagation(); dx < 0 ? nextM() : prevM(); }
-  };
-
-  // 今月を起点に前後の月ボタンを並べる（Googleカレンダー風）。押すとその月へ
-  const stripRef = useRef(null);
-  const monthStrip = [];
-  for (let i = -3; i <= 12; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    monthStrip.push({ y: d.getFullYear(), m: d.getMonth() });
-  }
-  useEffect(() => {
-    const el = stripRef.current && stripRef.current.querySelector('[data-on="1"]');
-    if (el && el.scrollIntoView) el.scrollIntoView({ inline: "center", block: "nearest" });
-  }, [ym]);
-
-  return (
-    <div style={S.colWrap}>
-      <div style={wide ? S.calRow : { display: "contents" }}>
-      <div style={{ ...S.calBlock, ...(wide ? S.calLeft : {}) }}>
-      <div style={S.calGrid} onTouchStart={onCalTouchStart} onTouchEnd={onCalTouchEnd}>
-        {WD.map((w, i) => (
-          <div key={w} style={{ ...S.calWd, color: i === 0 ? "#FF6B6B" : i === 6 ? C.ink3 : C.ink3 }}>{w}</div>
-        ))}
-        {cells.map((dd, i) => {
-          if (dd === null) return <div key={i} style={S.calCellEmpty} />;
-          const k = key(ym.y, ym.m, dd);
-          const items = byDate[k] || [];
-          const isToday = k === todayKey;
-          const isSel = k === selected;
-          const dow = i % 7;
-          const holiday = isHoliday(k);
-          const dots = [...new Set(items.map((it) => it.color))].slice(0, 4);
-          return (
-            <button key={i} onClick={() => setSelected(k)}
-              style={{ ...S.calCell, ...(isSel ? S.calCellSel : {}) }}>
-              <span style={{ ...S.calDay, color: isToday ? "#fff" : (dow === 0 || holiday) ? "#FF6B6B" : C.ink, ...(isToday ? S.calDayToday : {}) }}>{dd}</span>
-              <span style={S.calDots}>
-                {dots.map((c, j) => <span key={j} style={{ ...S.calDot, background: c }} />)}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-      <div style={S.calMonthStrip} ref={stripRef}>
-        {monthStrip.map((mm) => {
-          const on = mm.y === ym.y && mm.m === ym.m;
-          const label = mm.m === 0 ? `${mm.y}年1月` : `${mm.m + 1}月`;
-          return (
-            <button key={`${mm.y}-${mm.m}`} data-on={on ? "1" : "0"}
-              style={{ ...S.calMonthBtn, ...(on ? S.calMonthBtnOn : {}) }}
-              onClick={() => setYm({ y: mm.y, m: mm.m })}>{label}</button>
-          );
-        })}
-      </div>
-      </div>
-
-      <div style={{ ...S.calDetail, ...(wide ? S.calRight : {}) }}>
-        <div style={S.calDetailHead}>
-          <CalendarDays size={15} color={C.accent} strokeWidth={2.2} />
-          <span style={S.calDetailDate}>{selLabel}</span>
-          <span style={S.calDetailCount}>{selItems.length}件</span>
-        </div>
-        {selItems.length === 0 && <div style={S.calDetailEmpty}>予定はありません。</div>}
-        {selItems.map((it, j) => (
-          <button key={j} style={S.calDetailItem} onClick={() => it.project.id !== INBOX_ID && onOpen(it.project)}>
-            <span style={{ ...S.calDetailBar, background: it.color }} />
-            <span style={S.calDetailCol}>
-              <span style={S.calDetailLabel}>{it.label}</span>
-              {it.project && it.project.id !== INBOX_ID && it.project.company &&
-                <span style={S.calDetailProject}>{it.project.company}</span>}
-            </span>
-            <span style={{ ...S.calDetailKind, color: it.color }}>{it.kind === "deadline" ? "納期" : "タスク"}</span>
-          </button>
-        ))}
-      </div>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================
-   小物コンポーネント
-   ============================================================ */
 function useWideScreen(bp = 820) {
   const get = () => (typeof window !== "undefined" ? window.innerWidth >= bp : false);
   const [w, setW] = useState(get);
@@ -7732,24 +7601,13 @@ const S = {
   kanAdd: { marginLeft: "auto", border: "none", background: "transparent", color: C.accent, display: "inline-flex", alignItems: "center", padding: 2 },
   kanColBody: { display: "flex", flexDirection: "column", gap: 14, minWidth: 0 },
   kanEmpty: { fontSize: 13, color: C.ink3, padding: "8px 2px" },
-  calRow: { display: "flex", gap: 18, alignItems: "flex-start" },
-  calLeft: { flex: "0 0 430px", maxWidth: 430, minWidth: 0 },
-  calRight: { flex: 1, minWidth: 0, marginTop: 0 },
   calMonthStrip: { display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "none" },
-  calMonthBtn: { flexShrink: 0, border: `1px solid ${C.line}`, background: C.panel, color: C.ink2, borderRadius: 999, padding: "7px 15px", fontSize: 15, fontWeight: 700, whiteSpace: "nowrap", fontFamily: F.disp },
-  calMonthBtnOn: { background: C.accent, borderColor: C.accent, color: "#fff" },
   calNav: { border: `1px solid ${C.line}`, background: C.panel, borderRadius: 9, padding: 7, display: "flex", color: C.ink },
   calTitle: { fontFamily: F.disp, fontWeight: 700, fontSize: 17, minWidth: 130, textAlign: "center" },
-  calToday: { marginLeft: "auto", border: `1px solid ${C.line}`, background: C.panel, borderRadius: 9, padding: "7px 14px", fontSize: 14.5, fontWeight: 700, color: C.ink },
-  calGrid: { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, background: C.line, border: `1px solid ${C.line}`, borderRadius: 14, padding: 4, overflow: "hidden" },
-  calWd: { fontSize: 14, fontWeight: 700, textAlign: "center", padding: "5px 0" },
-  calCell: { background: C.panel, border: "1.5px solid transparent", borderRadius: 9, minHeight: 50, padding: "5px 2px 6px", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, cursor: "pointer" },
   calCellEmpty: { background: C.panel2, borderRadius: 9, minHeight: 50, opacity: 0.4 },
   calCellSel: { borderColor: C.accent, background: "rgba(107,138,255,0.1)" },
-  calDay: { fontFamily: F.disp, fontWeight: 700, fontSize: 14, lineHeight: 1 },
   calDayToday: { background: "#6B8AFF", color: "#fff", borderRadius: 13, minWidth: 21, height: 21, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" },
   calDots: { display: "flex", gap: 2.5, minHeight: 6, alignItems: "center" },
-  calDot: { width: 5.5, height: 5.5, borderRadius: "50%" },
 
   calDetail: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, display: "flex", flexDirection: "column", gap: 8 },
   calDetailHead: { display: "flex", alignItems: "center", gap: 8, paddingBottom: 4 },
