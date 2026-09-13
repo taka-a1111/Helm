@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-13k"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-13l"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -149,7 +149,6 @@ const FOCUS_STATUSES = [
 
 // 案件一覧のフィルタチップ（すべて＋タスクレーン）
 const FOCUS_FILTERS = [
-  { key: "registry", label: "案件一覧" },
   { key: "all",     label: "すべて" },
   { key: "today",    label: "今日" },
   { key: "tomorrow", label: "明日" },
@@ -1493,8 +1492,6 @@ export default function App() {
         : (p.tasks || []).map((t) => (t.done || t.repeat) ? t : { ...t, done: true, doneAt: Date.now() }),
     }));
   // ① 案件一覧のリンク並び替え（project.linksを共有しているので詳細ドロワーも同順になる）
-  const reorderLinks = (pid, links) =>
-    persist(projects.map((p) => p.id !== pid ? p : { ...p, links }));
   // カードから返信案を消す／その場で生成する
   const clearRsug = (pid) =>
     persist((projectsRef.current || []).map((p) => p.id !== pid ? p : { ...p, rsug: null }));
@@ -2070,9 +2067,8 @@ export default function App() {
               <div style={S.triSticky}>
                 <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />
               </div>
-              {focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
               {focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} intakes={intakes} onApplyIntake={applyIntake} onNewIntake={newFromIntake} onDropIntake={closeIntake} orphans={(projects.find((p) => p.id === INBOX_ID) || {}).orphans || []} onAssignOrphan={assignOrphan} onNewOrphan={newFromOrphan} onIgnoreOrphan={ignoreOrphan} onClearAuto={clearAutoMarks} money={money} moneyOpen={moneyOpen} heldRank={held.projRank} />}
-              {focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
+              {focusFilter !== "all" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             </div>
             <div style={S.triCol}>
               <TasksView forceNarrow projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={paneLane} setActiveLane={setPaneLane} heldLane={held.taskLane} />
@@ -2084,9 +2080,8 @@ export default function App() {
         ) : (
           <>
             {view === "focus" && <FilterChips projects={projects} filter={focusFilter} onChange={setFocusFilter} />}
-            {view === "focus" && focusFilter === "registry" && <ProjectListView projects={projects} onOpen={openProject} onReorderLinks={reorderLinks} />}
             {view === "focus" && focusFilter === "all" && <FocusView kpi={kpi} projects={active} allProjects={projects} onOpen={openProject} onSetDeadline={setDeadline} onAddTask={addTaskToLane} onUpdateTask={updateTask} onReorder={reorderVisual} onReorderCommit={commitOrder} onEditTask={(pid, tid, focus) => setEditTask({ pid, tid, focus })} onToggleTask={toggleTask} onWipTask={setTaskWip} onToggleProject={toggleProjectDone} onReorderTask={reorderTaskVisual} onMoveTask={moveTaskToProject} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onNoReply={markNoReply} onAckSug={ackSug} onAckTaskSug={ackTaskSug} intakes={intakes} onApplyIntake={applyIntake} onNewIntake={newFromIntake} onDropIntake={closeIntake} orphans={(projects.find((p) => p.id === INBOX_ID) || {}).orphans || []} onAssignOrphan={assignOrphan} onNewOrphan={newFromOrphan} onIgnoreOrphan={ignoreOrphan} onClearAuto={clearAutoMarks} money={money} moneyOpen={moneyOpen} heldRank={held.projRank} />}
-            {view === "focus" && focusFilter !== "all" && focusFilter !== "registry" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
+            {view === "focus" && focusFilter !== "all" && <TasksView singleLane projects={projects} onToggle={toggleTask} onWip={setTaskWip} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={focusFilter} setActiveLane={setFocusFilter} heldLane={held.taskLane} />}
             {view === "calendar" && <CalendarView projects={projects} onOpen={openProject} />}
           </>
         )}
@@ -3007,138 +3002,6 @@ function focusFilterCount(projects, key) {
 }
 // 案件一覧上部のフィルタチップ（件数付き）
 // ① 案件一覧の1行。リンクチップは長押し(180ms)→ドラッグで同一案件内のみ並び替え可能
-function PLRow({ p, dim, onOpen, onReorderLinks }) {
-  const ls = p.links || [];
-  const [order, setOrder] = useState(null);   // ドラッグ中の見た目上の並び（link idの配列）
-  const [dragLid, setDragLid] = useState(null);
-  const lpTimer = useRef(null);
-  const downInfo = useRef(null);
-  const dragRef = useRef(null);
-  const suppressClick = useRef(false);
-  const wrapRef = useRef(null);
-  const lsRef = useRef(ls); lsRef.current = ls;
-  const preventScroll = useRef((e) => { e.preventDefault(); }).current;
-  useEffect(() => () => { try { document.removeEventListener("touchmove", preventScroll); } catch {} }, []);
-  const chipDown = (e, lid) => {
-    downInfo.current = { x: e.clientX, y: e.clientY, lid, el: e.currentTarget, pointerId: e.pointerId };
-    lpTimer.current = setTimeout(() => {
-      const di = downInfo.current; if (!di) return;
-      lpTimer.current = null;
-      try { di.el.setPointerCapture(di.pointerId); } catch {}
-      try { document.addEventListener("touchmove", preventScroll, { passive: false }); } catch {}
-      dragRef.current = { lid };
-      setDragLid(lid);
-      setOrder(lsRef.current.map((l) => l.id));
-      try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
-    }, 180);
-  };
-  const chipMove = (e) => {
-    if (lpTimer.current && downInfo.current) {
-      if (Math.hypot(e.clientX - downInfo.current.x, e.clientY - downInfo.current.y) > 10) { clearTimeout(lpTimer.current); lpTimer.current = null; }
-    }
-    const dr = dragRef.current; if (!dr) return;
-    const wrap = wrapRef.current; if (!wrap) return;
-    const chips = Array.from(wrap.querySelectorAll("[data-lid]"));
-    let target = null;
-    for (const c of chips) {
-      const r = c.getBoundingClientRect();
-      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) { target = c.getAttribute("data-lid"); break; }
-    }
-    if (!target || target === dr.lid) return;
-    setOrder((prev) => {
-      const arr = prev ? [...prev] : lsRef.current.map((l) => l.id);
-      const from = arr.indexOf(dr.lid), to = arr.indexOf(target);
-      if (from < 0 || to < 0 || from === to) return prev;
-      arr.splice(from, 1); arr.splice(to, 0, dr.lid);
-      return arr;
-    });
-  };
-  const chipUp = () => {
-    if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = null; }
-    if (dragRef.current) {
-      try { document.removeEventListener("touchmove", preventScroll); } catch {}
-      setOrder((cur) => {
-        if (cur) {
-          const base = lsRef.current;
-          const changed = cur.length === base.length && cur.some((id, i) => base[i] && base[i].id !== id);
-          if (changed) {
-            const next = cur.map((id) => base.find((l) => l.id === id)).filter(Boolean);
-            if (next.length === base.length) onReorderLinks(p.id, next);
-          }
-        }
-        return null;
-      });
-      dragRef.current = null;
-      setDragLid(null);
-      suppressClick.current = true;
-      setTimeout(() => { suppressClick.current = false; }, 250);
-    }
-    downInfo.current = null;
-  };
-  const openLink = (e, l) => {
-    e.stopPropagation();
-    if (suppressClick.current || dragRef.current) { e.preventDefault(); return; }
-    if (!l.url) { e.preventDefault(); return; }
-    if (isAndroidUA()) {
-      const iu = claudeIntentUrl(l.url);
-      if (iu) { e.preventDefault(); window.location.href = iu; }
-    }
-  };
-  const shownLinks = order ? order.map((id) => ls.find((l) => l.id === id)).filter(Boolean) : ls;
-  return (
-    <div style={{ ...S.plItem, ...(dim ? { opacity: 0.55 } : {}) }}>
-      <button style={S.plName} onClick={() => onOpen(p)}>{p.company || "（無題）"}</button>
-      {ls.length > 0 && (
-        <div ref={wrapRef} style={S.plLinks}>
-          {shownLinks.map((l) => {
-            const ic = linkIconOf(l);
-            const dragging = dragLid === l.id;
-            return (
-            <a key={l.id} data-lid={l.id} href={l.url || undefined} target="_blank" rel="noopener noreferrer"
-              draggable={false} onDragStart={(e) => e.preventDefault()}
-              onContextMenu={(e) => e.preventDefault()}
-              style={{ ...S.plLink, ...(l.kind === "reply" ? S.plLinkReply : {}),
-                ...(dragging ? S.plLinkDragging : {}),
-                ...(dragLid && !dragging ? { opacity: 0.55 } : {}),
-                touchAction: dragLid ? "none" : "pan-y" }}
-              onPointerDown={(e) => chipDown(e, l.id)} onPointerMove={chipMove} onPointerUp={chipUp} onPointerCancel={chipUp}
-              onClick={(e) => openLink(e, l)} title={l.url || ""}>
-              {l.url ? <Favicon url={l.url} size={15} /> : <ic.Icon size={14} color={ic.color} strokeWidth={2.2} style={{ flexShrink: 0 }} />}
-              {linkLabelOf(l)}
-            </a>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-function ProjectListView({ projects, onOpen, onReorderLinks }) {
-  const [showDone, setShowDone] = useState(false);
-  const recency = (p) => {
-    let m = (typeof p.repliedAt === "number") ? p.repliedAt : 0;
-    if (typeof p.createdAt === "number" && p.createdAt > m) m = p.createdAt;
-    (p.tasks || []).forEach((t) => { if (typeof t.doneAt === "number" && t.doneAt > m) m = t.doneAt; });
-    return m;
-  };
-  const open = projects.filter((p) => p.id !== INBOX_ID && p.status !== "完了").sort((a, b) => recency(b) - recency(a));
-  const doneList = projects.filter((p) => p.id !== INBOX_ID && p.status === "完了").sort((a, b) => recency(b) - recency(a));
-  return (
-    <div style={S.colWrap}>
-      {open.length === 0 && <div style={S.plEmpty}>案件がありません</div>}
-      {open.map((p) => <PLRow key={p.id} p={p} onOpen={onOpen} onReorderLinks={onReorderLinks} />)}
-      {doneList.length > 0 && (
-        <>
-          <button style={{ ...S.doneAccordion, marginTop: 10 }} onClick={() => setShowDone((v) => !v)}>
-            <ChevronRight size={13} strokeWidth={2.4} style={{ transform: showDone ? "rotate(90deg)" : "none", transition: "transform 0.15s" }} />
-            完了 ({doneList.length}件)
-          </button>
-          {showDone && doneList.map((p) => <PLRow key={p.id} p={p} dim onOpen={onOpen} onReorderLinks={onReorderLinks} />)}
-        </>
-      )}
-    </div>
-  );
-}
 function FilterChips({ projects, filter, onChange }) {
   const wrapRef = useRef(null);
   // アクティブなチップ（青下線）が画面外に出ないよう、切替のたびに横スクロールを追従させる
@@ -3161,9 +3024,7 @@ function FilterChips({ projects, filter, onChange }) {
           <button key={f.key} data-fkey={f.key} onClick={() => onChange(f.key)}
             style={{ ...S.filterChip, ...(on ? S.filterChipOn : {}) }}>
             {f.label}
-            {f.key !== "registry" && (
-              <span style={{ ...S.filterChipCount, ...(on ? { color: C.accent } : {}) }}>{focusFilterCount(projects, f.key)}</span>
-            )}
+            <span style={{ ...S.filterChipCount, ...(on ? { color: C.accent } : {}) }}>{focusFilterCount(projects, f.key)}</span>
           </button>
         );
       })}
