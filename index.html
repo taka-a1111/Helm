@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-13o"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-13p"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -2805,7 +2805,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
           </span>
           {(() => {
             // メモの1行目だけ出す。開かずに要点（金額・約束事）が分かるようにする
-            const memo = String(p.note || "").split("\n").map((x) => x.trim()).filter(Boolean)[0] || "";
+            const memo = String(p.note || "").split("\n").map((x) => x.trim()).filter(Boolean).join(" / ");
             return memo ? <div style={S.cardNoteLine} title={p.note}>{memo}</div> : null;
           })()}
           {(() => {
@@ -7142,7 +7142,7 @@ const S = {
   cardTaskList: { display: "flex", flexDirection: "column", gap: 9, marginTop: 10, paddingLeft: 30 },
   cardTaskRow: { display: "flex", alignItems: "flex-start", gap: 12, cursor: "pointer" },
   snoozeBtn: { display: "inline-flex", alignItems: "center", gap: 2, border: `1px solid ${C.line}`, borderRadius: 7, background: "transparent", color: C.ink3, fontSize: 12, fontWeight: 700, padding: "3px 8px", cursor: "pointer", whiteSpace: "nowrap" },
-  cardNoteLine: { marginTop: 4, fontSize: 13, color: C.ink3, lineHeight: 1.45, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  cardNoteLine: { marginTop: 4, fontSize: 13, color: C.ink3, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", whiteSpace: "normal", wordBreak: "break-word", minWidth: 0 },
   cardTaskCheck: { display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", padding: 2, flexShrink: 0, cursor: "pointer" },
   cardTaskTitle: { fontSize: 19, color: C.ink, lineHeight: 1.35, wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" },
   cardTaskMore: { fontSize: 14, color: C.ink3, fontWeight: 600, paddingLeft: 17 },
