@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-09a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-13a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1591,6 +1591,8 @@ export default function App() {
         }
       });
       const memo = String(pl.note || "").trim();
+      // status: プロジェクト側のClaudeは会話の文脈を持っているので、指定があればそれを正とする
+      const st = STATUSES.indexOf(String(pl.status || "")) >= 0 ? String(pl.status) : null;
       // links: Claudeプロジェクト側から「このプロジェクトのURLを登録して」と送れる
       const addLinks = (pl.links || [])
         .filter((l) => l && /^https?:\/\//.test(l.url || ""))
@@ -1598,6 +1600,9 @@ export default function App() {
         .map((l) => ({ id: uid(), label: String(l.label || "").slice(0, 20), url: l.url }));
       return {
         ...p, tasks,
+        status: st || p.status,
+        statusAt: st ? new Date().toISOString() : p.statusAt,
+        autoSt: st ? null : p.autoSt,
         links: addLinks.length ? [...(p.links || []), ...addLinks] : p.links,
         autoLink: addLinks.length ? { labels: addLinks.map((l) => l.label || "リンク"), at: Date.now() } : p.autoLink,
         note: memo ? ((p.note ? p.note + "\n" : "") + memo) : p.note,
@@ -1650,6 +1655,9 @@ export default function App() {
     if (!ps.length) return;
     const hits = ps.filter((p) => {
       if (p.id === INBOX_ID || p.status === "完了") return false;
+      // 最後のやり取りより後に自分でステータスを決めていれば、その判断を尊重して自動変更しない
+      const last = (p.msgs || []).filter((m) => m.at).slice(-1)[0];
+      if (p.statusAt && last && atToTs(last.at) && new Date(p.statusAt).getTime() > atToTs(last.at)) return false;
       const sg = statusSuggestion(p);
       return sg && sg.mark === "warn" && (sg.suggest === "進行中" || sg.suggest === "相手待ち") && sg.suggest !== p.status;
     });
@@ -2768,6 +2776,12 @@ function IntakeCard({ row, onApply, onDrop }) {
           <div style={S.intakeItemTitle}>{t}</div>
         </div>
       ))}
+      {pl.status && (
+        <div style={S.intakeItem}>
+          <span style={S.intakeTag}>状態</span>
+          <div style={S.intakeItemTitle}>「{pl.status}」に変更</div>
+        </div>
+      )}
       {(pl.links || []).map((l, i) => (
         <div key={"l" + i} style={S.intakeItem}>
           <span style={S.intakeTag}>リンク</span>
