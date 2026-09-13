@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-13b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-13c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -413,7 +413,7 @@ const taskJudgeDate = (t) => t.start || t.due || "";
 // タスクがToDoのどのレーンに入るか：タスクのkind（waiting/payment）が最優先、
 // 振り分け：タスクのkind → タスク自身の日付 → 案件ステータス → 案件の「いつやる」継承 → 明後日以降
 // タスク名から「相手のボール」を読み取る。明示的に指定していなくても分かるようにする
-const WAIT_TITLE = /(待ち|入金確認|着金確認|返信待|回答待|承認待|検収|届き次第|連絡待|確認依頼中|レビュー待|返答待|支払|請求書の?(提出|送付)後)/;
+const WAIT_TITLE = /(待ち|待つ|入金確認|着金確認|返信待|回答待|承認待|検収|届き次第|届いたら|連絡待|確認依頼中|レビュー待|返答待|支払|請求書の?(提出|送付)後|受け取(る|って)|受領|もらう|もらったら|いただいたら|支給|共有してもら|送ってもら|提供を)/;
 // このタスクのボールはどちらにあるか。"them" = 相手、"me" = 自分
 function taskBall(project, task) {
   if (!task) return "me";
@@ -2895,7 +2895,7 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
             {sug && sug.mark === "ok" && <Check size={13} color="#51CF66" strokeWidth={3} style={{ flexShrink: 0 }} />}
             {sug && sug.mark === "warn" && <AlertTriangle size={13} color="#D9A23B" strokeWidth={2.6} style={{ flexShrink: 0 }} />}
             {sug && sug.mark === "todo" && <Hourglass size={13} color={C.accent} strokeWidth={2.6} style={{ flexShrink: 0 }} title="こちらの作業が残っています" />}
-        {(() => { const b = ballCounts(p); if (!b.me && !b.them) return null; return (
+        {(() => { const b = ballCounts(p); if (!b.me || !b.them) return null; return (
           <span style={S.ballCount} title="未完了タスクの内訳（自分のボール／相手のボール）">
             {b.me > 0 && <span style={S.ballCountMe}>自分{b.me}</span>}
             {b.them > 0 && <span style={S.ballCountThem}>相手{b.them}</span>}
