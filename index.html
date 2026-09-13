@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-13i"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-13j"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -1592,7 +1592,8 @@ export default function App() {
       // ① 完了指定：タイトルが近いものを完了にする
       let tasks = (p.tasks || []).map((t) => {
         if (t.done) return t;
-        return doneNames.some((n) => titleSim(n, t.title) >= 0.7) ? { ...t, done: true, doneAt: Date.now() } : t;
+        return doneNames.some((n) => titleSim(n, t.title) >= 0.7)
+          ? { ...t, done: true, doneAt: Date.now(), autoDone: { at: Date.now(), reason: "スキルから完了報告" } } : t;
       });
       // ② 追加：既存と重複するものは詳細欄に追記、無ければ新規
       addItems.forEach((a) => {
@@ -1602,13 +1603,14 @@ export default function App() {
         if (ex) {
           tasks = tasks.map((t) => t.id !== ex.id ? t : {
             ...t, note: note ? (t.note ? t.note + "\n" : "") + note : t.note,
-            start: t.start || dStr(0), sugOff: false,
+            start: t.start || dStr(0), sugOff: false, isAuto: "append", autoAt: Date.now(),
           });
         } else {
           tasks = [...tasks, { id: uid(), title, done: false, note,
             due: /^\d{4}-\d{2}-\d{2}$/.test(a.due || "") ? a.due : "",
             start: /^\d{4}-\d{2}-\d{2}$/.test(a.start || "") ? a.start : dStr(0),
-            lane: "today", kind: "task", repeat: null, links: [], wip: false, doneAt: null, sugOff: false }];
+            lane: "today", kind: "task", repeat: null, links: [], wip: false, doneAt: null, sugOff: false,
+            createdAt: Date.now(), isAuto: "new", autoAt: Date.now() }];
         }
       });
       const memo = String(pl.note || "").trim();
@@ -1804,6 +1806,18 @@ export default function App() {
     try { if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.filter((k) => k !== "helm-share").map((k) => caches.delete(k))); } } catch (e) {}
     window.location.replace(window.location.pathname + "?v=" + Date.now());
   };
+  // 案件名が一致した受信箱の行は、確認を待たずそのまま反映する。
+  // プロジェクト側で内容を確認して送っているので、Helmで二度確認する意味がない。
+  // 一致しなかった行だけ、どの案件に入れるかを尋ねるカードとして残す。
+  const autoAppliedRef = useRef(new Set());
+  useEffect(() => {
+    const ps = projectsRef.current || [];
+    if (!ps.length || !intakes.length) return;
+    const row = intakes.find((r) => !autoAppliedRef.current.has(r.id) && findProjectByName(ps, r.project));
+    if (!row) return;
+    autoAppliedRef.current.add(row.id);
+    applyIntake(row);
+  }, [intakes, projects]);
   const markSent = (pid, text) => {
     const now = new Date();
     const at = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
