@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-13d"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-13e"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -2846,17 +2846,21 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
             {sug && sug.mark === "ok" && <Check size={13} color="#51CF66" strokeWidth={3} style={{ flexShrink: 0 }} />}
             {sug && sug.mark === "warn" && <AlertTriangle size={13} color="#D9A23B" strokeWidth={2.6} style={{ flexShrink: 0 }} />}
             {sug && sug.mark === "todo" && <Hourglass size={13} color={C.accent} strokeWidth={2.6} style={{ flexShrink: 0 }} title="こちらの作業が残っています" />}
-        {(() => { const b = ballCounts(p); if (!b.me || !b.them) return null; return (
-          <span style={S.ballCount} title="未完了タスクの内訳（自分のボール／相手のボール）">
-            {b.me > 0 && <span style={S.ballCountMe}>自分{b.me}</span>}
-            {b.them > 0 && <span style={S.ballCountThem}>相手{b.them}</span>}
-          </span>
-        ); })()}
             {sug && sug.mark === "unknown" && <span style={S.trustUnknown} title="ログ未登録または古いため判定できません">?</span>}
             {liveTsqItems(p).length > 0 && <ListPlus size={14} color="#D9A23B" strokeWidth={2.6} style={{ flexShrink: 0 }} title="タスク候補あり（開いて確認）" />}
           </span>
-          {!dragActive && (st || dl) && (
+          {(() => {
+            const b = ballCounts(p);
+            const mixed = b.me > 0 && b.them > 0;
+            if (dragActive || (!st && !dl && !mixed)) return null;
+            return (
             <span style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
+              {mixed && (
+                <span style={S.ballCount} title="未完了タスクの内訳（自分のボール／相手のボール）">
+                  <span style={S.ballCountMe}>自分{b.me}</span>
+                  <span style={S.ballCountThem}>相手{b.them}</span>
+                </span>
+              )}
               {st && (
                 <span style={{ ...S.cardDateInline, display: "inline-flex", alignItems: "center", gap: 5 }} title="いつやる">
                   <CalendarDays size={13} strokeWidth={2.2} />{st.text}
@@ -2871,7 +2875,8 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
                 </span>
               )}
             </span>
-          )}
+            );
+          })()}
         </span>
         {!dragActive && replyN > 0 && (
           <span style={S.cardReplyPill} title="要返信あり">
@@ -7464,7 +7469,7 @@ const S = {
   cardCompanyRow: { display: "none" },
   cardCheck: { display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", padding: 2, marginTop: 1, flexShrink: 0, cursor: "pointer" },
 
-  cardCompany: { fontFamily: F.disp, fontWeight: 800, fontSize: 19, letterSpacing: 0.2, lineHeight: 1.3, color: C.ink },
+  cardCompany: { fontFamily: F.disp, fontWeight: 800, fontSize: 19, letterSpacing: 0.2, lineHeight: 1.3, color: C.ink, minWidth: 0, flex: "1 1 auto" },
   cardWork: { display: "none" },
   cardMetaLine: { display: "flex", alignItems: "baseline", gap: 10 },
   cardDeadlineOver: { color: "#F28B82" },
