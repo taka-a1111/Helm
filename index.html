@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-13e"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-13f"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -3731,15 +3731,8 @@ function scrollYNearest(el, delta) {
 }
 
 // 極小の並び替え矢印（↑↓）。ドラッグの代替。DOM表示順で隣と入れ替える
-function ArrowPair({ onUp, onDown }) {
-  const h = (fn) => (e) => { e.stopPropagation(); e.preventDefault(); fn && fn(e); };
-  return (
-    <span style={S.arrowPair} data-arrow="1" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-      <span role="button" tabIndex={-1} style={S.arrowBtn} title="上へ" onClick={h(onUp)}><ChevronUp size={14} strokeWidth={2.2} /></span>
-      <span role="button" tabIndex={-1} style={S.arrowBtn} title="下へ" onClick={h(onDown)}><ChevronDown size={14} strokeWidth={2.2} /></span>
-    </span>
-  );
-}
+// 上下移動ボタンは廃止。横幅を案件名に回すため、並び替えは長押しドラッグのみとする
+function ArrowPair() { return null; }
 
 // ステータスアイコン（名前の右に表示）。進行中は何も出さない。
 function StatusIcon({ status, size = 14 }) {
@@ -7680,11 +7673,11 @@ const S = {
   orphanOpen: { display: "inline-flex", alignItems: "center", gap: 5, alignSelf: "flex-start", border: `1px solid ${C.line}`, borderRadius: 8, background: C.panel, color: C.accent, fontSize: 13, fontWeight: 700, padding: "6px 11px", textDecoration: "none" },
   orphanNew: { border: `1px solid ${C.line}`, borderRadius: 9, background: C.panel, color: C.ink, fontSize: 13.5, fontWeight: 700, padding: "9px 14px", cursor: "pointer" },
   autoCard: { border: `1px solid ${C.line}`, background: C.panel, borderRadius: 12, padding: 12, display: "grid", gap: 8, marginBottom: 12 },
-  ballThem: { display: "inline-block", marginLeft: 6, fontSize: 10.5, fontWeight: 800, color: "#D9A23B", background: "rgba(217,162,59,0.16)", borderRadius: 5, padding: "1px 5px", verticalAlign: "1px", whiteSpace: "nowrap" },
-  ballPay: { display: "inline-block", marginLeft: 6, fontSize: 10.5, fontWeight: 800, color: "#8FBF9A", background: "rgba(81,207,102,0.16)", borderRadius: 5, padding: "1px 5px", verticalAlign: "1px", whiteSpace: "nowrap" },
-  ballCount: { display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 },
-  ballCountMe: { fontSize: 10.5, fontWeight: 800, color: C.accent, background: "rgba(107,138,255,0.16)", borderRadius: 5, padding: "1px 6px" },
-  ballCountThem: { fontSize: 10.5, fontWeight: 800, color: "#D9A23B", background: "rgba(217,162,59,0.16)", borderRadius: 5, padding: "1px 6px" },
+  ballThem: { display: "inline-block", marginLeft: 6, fontSize: 12, fontWeight: 800, color: "#D9A23B", background: "rgba(217,162,59,0.16)", borderRadius: 5, padding: "2px 7px", verticalAlign: "1px", whiteSpace: "nowrap" },
+  ballPay: { display: "inline-block", marginLeft: 6, fontSize: 12, fontWeight: 800, color: "#8FBF9A", background: "rgba(81,207,102,0.16)", borderRadius: 5, padding: "2px 7px", verticalAlign: "1px", whiteSpace: "nowrap" },
+  ballCount: { display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 },
+  ballCountMe: { fontSize: 13, fontWeight: 800, color: C.accent, background: "rgba(107,138,255,0.16)", borderRadius: 6, padding: "3px 9px", whiteSpace: "nowrap" },
+  ballCountThem: { fontSize: 13, fontWeight: 800, color: "#D9A23B", background: "rgba(217,162,59,0.16)", borderRadius: 6, padding: "3px 9px", whiteSpace: "nowrap" },
   newChip: { display: "inline-block", marginRight: 6, fontSize: 10.5, fontWeight: 800, color: C.accent, background: "rgba(107,138,255,0.16)", borderRadius: 5, padding: "1px 5px", verticalAlign: "1px" },
   intakeCard: { border: `1px solid ${C.accent}`, background: "rgba(107,138,255,0.08)", borderRadius: 12, padding: 12, display: "grid", gap: 8, marginBottom: 12 },
   intakeHead: { display: "flex", alignItems: "center", gap: 7 },
