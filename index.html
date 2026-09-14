@@ -2119,6 +2119,8 @@ export default function App() {
         if (!p || !t) return null;
         return (
           <SubtaskSheet project={p} task={t} focus={editTask.focus}
+            projects={projects.filter((x) => x.id !== INBOX_ID && x.status !== "完了")}
+            onMoveProject={(destPid) => { moveTaskToProject(editTask.tid, destPid); setEditTask({ pid: destPid, tid: editTask.tid, focus: "title" }); }}
             onClose={goBack}
             onUpdate={(patch) => updateTask(editTask.pid, editTask.tid, patch)}
             onToggle={() => toggleTask(editTask.pid, editTask.tid)}
@@ -2514,7 +2516,7 @@ function FocusView({ kpi, projects, allProjects, onOpen, onSetDeadline, onAddTas
                         <span>{g.label}</span>
                         <span style={{ ...S.focusGroupCount, color: g.color }}>{g.items.length}</span>
                       </div>
-                      {g.items.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onUpdateTask={onUpdateTask} onEditTask={onEditTask} onToggleTask={onToggleTask} onToggleProject={onToggleProject} dragging={false} dragActive={false} onTaskDrag={startTaskDrag} taskDragId={dragTaskId} onSetStatus={onSetStatus} onOpenReply={onOpenReply} onNoReply={onNoReply} onArrow={arrowMove} onAckSug={onAckSug} onAckTaskSug={onAckTaskSug} onDateMenu={(e, pid, t) => setDateMenu({ x: e.clientX, y: e.clientY, pid, tid: t.id, cur: taskJudgeDate(t) || "" })} />)}
+                      {g.items.map((p) => <ProjectCard key={p.id} p={p} onOpen={onOpen} onSetDeadline={onSetDeadline} onUpdateTask={onUpdateTask} onEditTask={onEditTask} onToggleTask={onToggleTask} onToggleProject={onToggleProject} dragging={false} dragActive={false} onSetStatus={onSetStatus} onOpenReply={onOpenReply} onNoReply={onNoReply} onArrow={arrowMove} onAckSug={onAckSug} onAckTaskSug={onAckTaskSug} onDateMenu={(e, pid, t) => setDateMenu({ x: e.clientX, y: e.clientY, pid, tid: t.id, cur: taskJudgeDate(t) || "" })} />)}
                     </div>
                   );
                 });
@@ -3341,6 +3343,15 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
       if (!gmap.has(t.project.id)) { const g = { project: t.project, tasks: [] }; gmap.set(t.project.id, g); groups.push(g); }
       gmap.get(t.project.id).tasks.push(t);
     });
+    // 案件内の並び：自分のボール→相手のボール、各グループ内は期限が近い順。
+    // 日付が同じものは元の並びのまま（①②③のような手順を崩さないため）
+    groups.forEach((g) => {
+      const key = (t) => {
+        const n = daysUntil(taskJudgeDate(t));
+        return [taskBall(g.project, t) === "them" ? 1 : 0, n === null ? Infinity : n];
+      };
+      g.tasks = g.tasks.slice().sort((a, b) => { const ka = key(a), kb = key(b); return ka[0] - kb[0] || ka[1] - kb[1]; });
+    });
     if (!doneOnly) {
       projects.forEach((p) => {
         if (gmap.has(p.id)) return;
@@ -3369,12 +3380,10 @@ function TasksView({ projects, onToggle, onOpen, onOpenTask, onEditTask, onChang
       {dragGid === null && g.tasks.length > 0 && !folded.has(g.project.id) && (
       <div style={S.taskGroupTasks}>
         {g.tasks.map((t) => (
-          <TaskCard key={t.id} t={t} lane={lane}
+          <TaskCard key={t.id} t={t} lane={lane} dragging={false} dragActive={false}
             onDateMenu={(e, pid, tk) => setDateMenu({ x: e.clientX, y: e.clientY, pid, tid: tk.id, cur: taskJudgeDate(tk) || "" })}
             onToggle={onToggle} onOpen={onOpen} onOpenTask={onOpenTask} onEditTask={onEditTask}
             onAckTaskSug={onAckTaskSug}
-            dragging={dragTid === t.id} dragActive={dragTid !== null || dragGid !== null}
-            onStartDrag={startTaskDrag} onArrow={taskArrow}
             onChangeStart={(start) => onChangeStart(t.project.id, t.id, start)}
             onChangeDue={(due) => onChangeDue(t.project.id, t.id, due)}
             onChangeKind={(kind) => onChangeKind && onChangeKind(t.project.id, t.id, kind)} />
@@ -4816,10 +4825,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
                       : <Circle size={17} color="#5A6472" strokeWidth={2} />}
                   </button>
                 ) : (
-                  <button style={S.taskDragHandle} title="ドラッグで並べ替え"
-                    onPointerDown={(e) => startTaskReorder(e, t.id)}>
-                    <GripVertical size={16} color="#5A6472" strokeWidth={2} />
-                  </button>
+                  <span style={{ ...S.taskDragHandle, cursor: "default" }} />
                 )}
                 <button style={S.checkBtn} onClick={() => setTask(t.id, "done", !t.done)} title="タスクを完了">
                   <Circle size={18} color="#3A434F" strokeWidth={2} />
@@ -5121,15 +5127,31 @@ function useWideScreen(bp = 820) {
   useEffect(() => { const on = () => setW(get()); window.addEventListener("resize", on); return () => window.removeEventListener("resize", on); }, []);
   return w;
 }
-function SubtaskSheet({ project, task, focus, onClose, onUpdate, onToggle, onDelete }) {
+function SubtaskSheet({ project, task, focus, projects, onMoveProject, onClose, onUpdate, onToggle, onDelete }) {
   const [confirm, setConfirm] = useState(false);
+  const [moving, setMoving] = useState(false);
   const wide = useWideScreen();
   return (
     <>
       <div style={S.scrim} onClick={onClose} />
       <aside style={wide ? S.taskDrawer : S.taskSheet}>
+        {moving && (
+          <div style={S.moveBox}>
+            <div style={S.mergeHint}>移動先の案件を選んでください</div>
+            <div style={S.candRow}>
+              {(projects || []).filter((x) => x.id !== project.id).map((x) => (
+                <button key={x.id} style={S.candChip} onClick={() => { setMoving(false); onMoveProject(x.id); }}>{x.company}</button>
+              ))}
+              <button style={S.intakeDrop} onClick={() => setMoving(false)}>やめる</button>
+            </div>
+          </div>
+        )}
         <div style={S.taskSheetHead}>
-          <span style={S.taskSheetProject}>{project.company}</span>
+          {/* 誤って別案件に入ったタスクをここで移す（一覧のドラッグは廃止したため） */}
+          <button style={S.taskSheetProject} title="別の案件へ移す"
+            onClick={() => onMoveProject && setMoving((v) => !v)}>
+            {project.company} <ChevronDown size={13} strokeWidth={2.6} style={{ verticalAlign: "-2px" }} />
+          </button>
           {confirm ? (
             <>
               <span style={S.delText}>削除しますか？</span>
@@ -7574,6 +7596,7 @@ const S = {
   mergeToggleOn: { borderColor: C.accent, color: C.accent, background: "rgba(107,138,255,0.12)" },
   mergeHint: { fontSize: 12, color: C.ink3, lineHeight: 1.6, margin: "2px 0 8px 31px" },
   sweepDone: { display: "flex", alignItems: "center", justifyContent: "center", gap: 7, width: "100%", border: "1px solid rgba(81,207,102,0.35)", borderRadius: 10, background: "rgba(81,207,102,0.10)", color: "#8FBF9A", fontSize: 13, fontWeight: 800, padding: "10px 12px", cursor: "pointer", margin: "2px 0 8px 0" },
+  moveBox: { display: "grid", gap: 8, padding: 12, borderBottom: `1px solid ${C.line}`, background: C.panel2 },
   doneFold: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "transparent", color: C.ink3, fontSize: 13, fontWeight: 700, padding: "8px 2px", cursor: "pointer", textAlign: "left" },
   doneRow: { display: "flex", alignItems: "center", gap: 6, padding: "4px 0" },
   doneTitle: { flex: 1, minWidth: 0, fontSize: 14, color: C.ink3, textDecoration: "line-through", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
