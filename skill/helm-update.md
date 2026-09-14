@@ -72,6 +72,8 @@ curl -s -X POST "https://fgbqheodukryhcmrjucn.supabase.co/rest/v1/rpc/helm_proje
   - 納品・提出・公開・回答が済んだものだけ。「これから対応します」は完了ではない。
 - **links** … 登録したいURL（Claudeプロジェクト、公開URL、Docs等）。
   - Claudeプロジェクトのリンクを送る場合、URLはユーザーから受け取ること。自分では取得できない。
+- **next** … 「次の1手」（1行・120字以内）。案件一覧の先頭に出る。
+  次に何をするかが変わったら必ず更新する。例：「9/15 14:00 瀧田様へ電話して書類名称を確定」
 - **note** … 案件メモに追記したい短い文。金額・納期・約束事など。
 - **reward** … 報酬（円・数値）。新しい案件を作るときだけ使う。既存案件では無視される。
 - **platform** … `クラウドワークス` / `ランサーズ` / `ココナラ` / `直契約` / `その他`。新しい案件を作るときだけ使う。
@@ -92,6 +94,7 @@ cat > /tmp/intake.json <<'JSON'
 {"source":"（このプロジェクト名）","project":"（Helm上の案件名）",
  "payload":{
    "status":"相手待ち",
+   "next":"次にやること（1行）",
    "add":[{"title":"タスク名","note":"・内訳1\n・内訳2","due":"YYYY-MM-DD"}],
    "done":["完了したタスク名"],
    "links":[{"label":"Claude","url":"https://claude.ai/project/..."}],
