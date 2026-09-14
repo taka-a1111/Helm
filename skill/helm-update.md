@@ -68,6 +68,12 @@ curl -s -X POST "https://fgbqheodukryhcmrjucn.supabase.co/rest/v1/rpc/helm_proje
   - 例：「LP修正5点」は5タスクではなく、1タスク＋note5行。
   - 既存タスクと同じ成果物への追加指示なら、新規にせず同じ `title` で送る。Helmが詳細欄へ追記する。
   - タスク名に日付や曜日を書かない。期限は `due` に入れる（曜日はHelmが正しく表示する）。
+- **add の各タスクに指定できるもの**
+  - `state` … `未着手` / `保留` / `完了`。省略は未着手。
+  - `hold` … 保留の再開予定日（YYYY-MM-DD）。`state":"保留"` で日付を省くと7日後になる。
+  - 既存タスクと同じ `title` で送ると、詳細欄への追記に加えて `due` `state` `hold` も更新される。
+  - 「中止でも完了でもない、いまは着手しない」ものは完了にせず `state":"保留"` で送る。
+    保留中は今日の列から外れ、期限超過の赤字も出なくなる。再開予定日が来ると通常のタスクに戻る。
 - **done** … 完了したタスク名。取得した `tasks` の表記をそのまま使う。
   - 納品・提出・公開・回答が済んだものだけ。「これから対応します」は完了ではない。
 - **links** … 登録したいURL（Claudeプロジェクト、公開URL、Docs等）。
@@ -95,7 +101,7 @@ cat > /tmp/intake.json <<'JSON'
  "payload":{
    "status":"相手待ち",
    "next":"次にやること（1行）",
-   "add":[{"title":"タスク名","note":"・内訳1\n・内訳2","due":"YYYY-MM-DD"}],
+   "add":[{"title":"タスク名","note":"・内訳1\n・内訳2","due":"YYYY-MM-DD","state":"保留","hold":"YYYY-MM-DD"}],
    "done":["完了したタスク名"],
    "links":[{"label":"Claude","url":"https://claude.ai/project/..."}],
    "note":"案件メモへの追記"}}
