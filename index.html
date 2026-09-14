@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-13p"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-14a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -573,7 +573,8 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const wide = useWideScreen(); // PCではタスク画面を横幅いっぱいに広げる
-  const triPane = useWideScreen(1200); // PC：案件とタスクを横並び表示
+  const triPane = useWideScreen(1200); // PC：すべて／今日／明日の3列を横並び表示
+  const [pane2Lane, setPane2Lane] = useState("tomorrow"); // 3列目のレーン（既定は明日）
   const [paneLane, setPaneLane] = useState("today"); // 3画面表示のタスク列で選択中のレーン
   const VIEWS = ["focus"];
   useEffect(() => { try { window.scrollTo(0, 0); const m = document.querySelector("main"); if (m) m.scrollTop = 0; } catch {} }, [view]);
@@ -1296,13 +1297,27 @@ export default function App() {
 
   // 据え置き：変更前後でレーン/並び順位が変わった項目を「元の位置」に一時固定（ビュー切替で解除）
   const statusRankH = (p) => (p.status === "相手待ち" ? 1 : p.status === "支払い待ち" ? 2 : p.status === "商談中" ? 3 : 0);
+  const heldTimerRef = useRef(null);
+  // 据え置きは一定時間で自動解除する（ずっと固定すると本来の並びに戻らないため）
+  const armHeldRelease = () => {
+    if (heldTimerRef.current) clearTimeout(heldTimerRef.current);
+    heldTimerRef.current = setTimeout(() => setHeld({ taskLane: {}, projRank: {} }), 12000);
+  };
   const computeHeld = (prev, next) => {
     const prevById = {}; prev.forEach((p) => (prevById[p.id] = p));
+    // タスクの完了・日付変更で案件の並び順位が変わるので、変更前の並びを丸ごと記憶して留める
+    const prevOrder = {}; prev.forEach((p, i) => (prevOrder[p.id] = i));
     setHeld((h) => {
       let projRank = h.projRank, taskLane = h.taskLane, changed = false;
       next.forEach((np) => {
         const op = prevById[np.id]; if (!op) return;
-        if (statusRankH(op) !== statusRankH(np) && projRank[np.id] === undefined) { projRank = { ...projRank, [np.id]: statusRankH(op) }; changed = true; }
+        const taskChanged = JSON.stringify((op.tasks || []).map((t) => [t.id, t.done, t.start, t.due]))
+          !== JSON.stringify((np.tasks || []).map((t) => [t.id, t.done, t.start, t.due]));
+        if ((taskChanged || statusRankH(op) !== statusRankH(np)) && projRank[np.id] === undefined) {
+          // その案件だけでなく全案件の位置を固定しないと、周りが動いて同じことが起きる
+          prev.forEach((pp) => { if (projRank[pp.id] === undefined) projRank[pp.id] = prevOrder[pp.id]; });
+          projRank = { ...projRank }; changed = true; armHeldRelease();
+        }
         const otById = {}; (op.tasks || []).forEach((t) => (otById[t.id] = t));
         (np.tasks || []).forEach((nt) => {
           const ot = otById[nt.id]; if (!ot) return;
@@ -1321,7 +1336,10 @@ export default function App() {
   };
 
   // ビュー／フィルタを切り替えたら据え置きを解除して正しいレーンへ整列
-  useEffect(() => { setHeld({ taskLane: {}, projRank: {} }); }, [view, focusFilter]);
+  useEffect(() => {
+    if (heldTimerRef.current) { clearTimeout(heldTimerRef.current); heldTimerRef.current = null; }
+    setHeld({ taskLane: {}, projRank: {} });
+  }, [view, focusFilter]);
 
   // 共有ピッカーで選ばれた案件に、共有内容（リンク／本文）を反映して案件を開く
   const applyShare = (project) => {
@@ -2046,6 +2064,9 @@ export default function App() {
             </div>
             <div style={S.triCol}>
               <TasksView forceNarrow projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={paneLane} setActiveLane={setPaneLane} heldLane={held.taskLane} />
+            </div>
+            <div style={S.triCol}>
+              <TasksView forceNarrow projects={projects} onToggle={toggleTask} onOpen={openProject} onOpenTask={openProjectTask} onEditTask={(pid, tid) => setEditTask({ pid, tid, focus: "title" })} onChangeLane={changeLane} onChangeDue={changeDue} onChangeStart={changeStart} onChangeKind={changeKind} onAddTask={addTaskToLane} onReorderTask={reorderTaskVisual} onReorderProject={reorderVisual} onReorderCommit={commitOrder} onToggleProject={toggleProjectDone} onSetStatus={setProjectStatus} onOpenReply={(pid) => setReplyFor(pid)} onAckSug={ackSug} onAckTaskSug={ackTaskSug} onRollToday={rollStartsToToday} onNoReply={markNoReply} activeLane={pane2Lane} setActiveLane={setPane2Lane} heldLane={held.taskLane} />
             </div>
           </div>
         ) : (
