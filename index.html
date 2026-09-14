@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-14a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-14b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -376,7 +376,7 @@ function normalizeProjects(arr) {
       status: STATUS_MIGRATE[p.status] || p.status || "進行中",
       start: p.start ?? "",
       msgs: cleanMsgs(Array.isArray(p.msgs) ? p.msgs : []),
-      tsq: p.tsq ? (p.tsq.items ? p.tsq : { srcId: p.tsq.srcId || "", items: p.tsq.title ? [{ title: p.tsq.title, note: p.tsq.note || "", due: p.tsq.due || "", urgent: !!p.tsq.urgent }] : [] }) : null, tsqSeen: p.tsqSeen ?? "", rsug: p.rsug ?? null, autoSt: p.autoSt ?? null, autoLink: p.autoLink ?? null, rneed: (p.rneed && p.rneed.need === false && p.rneed.v !== 2) ? null : (p.rneed ?? null), statusAt: p.statusAt ?? null,
+      tsq: p.tsq ? (p.tsq.items ? p.tsq : { srcId: p.tsq.srcId || "", items: p.tsq.title ? [{ title: p.tsq.title, note: p.tsq.note || "", due: p.tsq.due || "", urgent: !!p.tsq.urgent }] : [] }) : null, tsqSeen: p.tsqSeen ?? "", rsug: p.rsug ?? null, autoSt: p.autoSt ?? null, autoLink: p.autoLink ?? null, next: p.next ?? "", rneed: (p.rneed && p.rneed.need === false && p.rneed.v !== 2) ? null : (p.rneed ?? null), statusAt: p.statusAt ?? null,
       received: p.received ?? "", replyDraft: p.replyDraft ?? "", repliedAt: p.repliedAt ?? null, replyUrl: p.replyUrl ?? "", replyHistory: p.replyHistory ?? [], summary: p.summary ?? "",
       tasks: (p.tasks || []).map((t) => ({ ...t, lane: t.lane || laneFromDue(t.due), kind: t.kind || "task", msg: t.msg ?? "", start: t.start ?? "", note: t.note ?? "", repeat: t.repeat ?? null, doneAt: t.doneAt ?? (t.done ? Date.now() : null), sugOff: t.sugOff ?? false, createdAt: t.createdAt ?? Date.now(), isAuto: t.isAuto ?? null, autoAt: t.autoAt ?? null, autoDone: t.autoDone ?? null })),
     };
@@ -436,7 +436,8 @@ function laneOf(project, task) {
   if (!project) return "later";
   if (project.status === "完了") return null;
   // タスク単体の相手待ち/支払い待ちが最優先
-  if (task.kind === "waiting") return "waiting";
+  // 相手待ちのタスク（種別指定＋タスク名からの判定）は、自分の作業と同じ列に置かない
+  if (taskBall(project, task) === "them" && task.kind !== "payment") return "waiting";
   if (task.kind === "payment") return "payment";
   // タスク自身に日付（いつやる/期限）があれば、案件ステータスより日付を優先して振り分け
   const own = taskJudgeDate(task);
@@ -1604,6 +1605,7 @@ export default function App() {
       status: st, statusAt: new Date().toISOString(), createdAt: Date.now(),
       reply: "なし", deadline: "", start: "", summary: "",
       note: String(pl.note || "").trim(),
+      next: typeof pl.next === "string" ? pl.next.trim().slice(0, 120) : "",
       received: "", replyDraft: "", repliedAt: null, replyUrl: "", replyHistory: [], msgs: [],
       links: (pl.links || []).filter((l) => l && /^https?:\/\//.test(l.url || ""))
         .map((l) => ({ id: uid(), label: String(l.label || "").slice(0, 20), url: l.url })),
@@ -1654,6 +1656,7 @@ export default function App() {
       const memo = String(pl.note || "").trim();
       // status: プロジェクト側のClaudeは会話の文脈を持っているので、指定があればそれを正とする
       const st = STATUSES.indexOf(String(pl.status || "")) >= 0 ? String(pl.status) : null;
+      const nx = typeof pl.next === "string" ? pl.next.trim().slice(0, 120) : null;
       // links: Claudeプロジェクト側から「このプロジェクトのURLを登録して」と送れる
       const addLinks = (pl.links || [])
         .filter((l) => l && /^https?:\/\//.test(l.url || ""))
@@ -1662,6 +1665,7 @@ export default function App() {
       return {
         ...p, tasks,
         status: st || p.status,
+        next: nx !== null ? nx : p.next,
         statusAt: st ? new Date().toISOString() : p.statusAt,
         autoSt: st ? null : p.autoSt,
         links: addLinks.length ? [...(p.links || []), ...addLinks] : p.links,
@@ -2825,7 +2829,9 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
             {liveTsqItems(p).length > 0 && <ListPlus size={14} color="#D9A23B" strokeWidth={2.6} style={{ flexShrink: 0 }} title="タスク候補あり（開いて確認）" />}
           </span>
           {(() => {
-            // メモの1行目だけ出す。開かずに要点（金額・約束事）が分かるようにする
+            // 「次の1手」があればそれを出す。無ければメモの冒頭で代用する
+            const nx = String(p.next || "").trim();
+            if (nx) return <div style={S.cardNextLine} title="次の1手">▸ {nx}</div>;
             const memo = String(p.note || "").split("\n").map((x) => x.trim()).filter(Boolean).join(" / ");
             return memo ? <div style={S.cardNoteLine} title={p.note}>{memo}</div> : null;
           })()}
@@ -3585,16 +3591,21 @@ function TaskMetaChips({ t, onMenu, onSnooze }) {
   const judge = taskJudgeDate(t);
   const lab = judge ? dateLabelJP(judge) : null;
   const jn = judge ? daysUntil(judge) : null;
-  const chipColor = jn === null ? C.ink3 : (jn < 0 ? "#F28B82" : C.ink2); // 赤は超過のみ（Googleタスク風の淡い赤）
+  // 相手待ちは「いつやる」がこちらの都合で決まらないので、期限超過の赤は出さない
+  const waiting = taskBall(t.project || null, t) === "them";
+  const chipColor = jn === null ? C.ink3 : (jn < 0 && !waiting ? "#F28B82" : C.ink2);
   return (
     <div style={S.dueWrap}>
-      <span style={{ ...S.dueChip, color: judge ? chipColor : C.ink3 }}
-        title={onMenu ? "右クリックで日付を変更" : undefined}
-        onContextMenu={onMenu ? (e) => { if (window.innerWidth >= 820) { e.preventDefault(); e.stopPropagation(); onMenu(e); } } : undefined}>
-        <CalendarDays size={12} strokeWidth={2.3} />{lab ? lab.text : "—"}
-      </span>
+      {/* 日付が無いタスクに「—」を出すと、未設定なのか遅れているのか分からなくなる。無いときは出さない */}
+      {judge && (
+        <span style={{ ...S.dueChip, color: chipColor }}
+          title={onMenu ? "右クリックで日付を変更" : undefined}
+          onContextMenu={onMenu ? (e) => { if (window.innerWidth >= 820) { e.preventDefault(); e.stopPropagation(); onMenu(e); } } : undefined}>
+          <CalendarDays size={12} strokeWidth={2.3} />{lab ? lab.text : ""}
+        </span>
+      )}
       {/* 今日やらないものを1タップで翌日へ送る。日付ピッカーを開くより速い */}
-      {onSnooze && !t.done && jn !== null && jn <= 0 && (
+      {onSnooze && !t.done && !waiting && jn !== null && jn <= 0 && (
         <button style={S.snoozeBtn} title="明日にする"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); onSnooze(); }}>
@@ -4295,6 +4306,7 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
   const [hideDoneTasks, setHideDoneTasks] = useState(true);
   const [confirmDelTask, setConfirmDelTask] = useState(null);
   const [mergeSel, setMergeSel] = useState(null); // null=通常, 配列=まとめるモード（選択中のtask id）
+  const [showDoneTasks, setShowDoneTasks] = useState(false);
   const toggleMergeSel = (id) => setMergeSel((v) => (v || []).indexOf(id) >= 0 ? (v || []).filter((x) => x !== id) : [...(v || []), id]);
   // 選んだタスクを1件に統合。各タスク名は詳細欄の箇条書きへ、日付は最も早いものを採用
   const doMerge = () => {
@@ -4632,6 +4644,14 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
             onKeyDown={enterClose}
             onChange={(e) => set("company", e.target.value)} />
 
+          {/* 次の1手：案件一覧の先頭に出る1行。開かずに次の行動が分かるようにするため */}
+          <div style={S.infoRow}>
+            <ChevronRight size={19} color={C.accent} strokeWidth={2.4} style={S.infoIcon} />
+            <input style={{ ...S.infoInput, fontWeight: 700 }} value={d.next || ""} placeholder="次の1手（1行）"
+              onKeyDown={enterClose} maxLength={120}
+              onChange={(e) => set("next", e.target.value)} />
+          </div>
+
           <div style={S.infoRow}>
             <AlignLeft size={19} color={C.ink3} strokeWidth={2} style={S.infoIcon} />
             <textarea style={{ ...S.infoInput, minHeight: 48 }} value={d.note} placeholder="詳細" rows={2}
@@ -4822,6 +4842,25 @@ function Drawer({ draft, focusTaskId, onClose, onSave, onAutoSave, onDelete, con
               <button style={S.taskAddRow} onClick={addTask}>
                 <Plus size={17} strokeWidth={2.6} />タスクを追加
               </button>
+            )}
+            {/* 完了タスクは記録として残すが常時は出さない。折りたたんでおき、必要なときだけ開く */}
+            {d.tasks.filter((t) => t.done).length > 0 && (
+              <>
+                <button style={S.doneFold} onClick={() => setShowDoneTasks((v) => !v)}>
+                  <ChevronDown size={14} strokeWidth={2.6}
+                    style={{ transform: showDoneTasks ? "none" : "rotate(-90deg)", transition: "transform 0.15s" }} />
+                  完了 {d.tasks.filter((t) => t.done).length}件
+                </button>
+                {showDoneTasks && d.tasks.filter((t) => t.done).map((t) => (
+                  <div key={t.id} style={S.doneRow}>
+                    <button style={S.taskDragHandle} title="未完了に戻す"
+                      onClick={() => patchTask(t.id, { done: false, doneAt: null, autoDone: null })}>
+                      <CheckCircle2 size={17} color="#51CF66" strokeWidth={2.4} />
+                    </button>
+                    <span style={S.doneTitle}>{t.title || "（無題）"}</span>
+                  </div>
+                ))}
+              </>
             )}
             {d.tasks.some((t) => t.done && !isArchivedTask(t)) && (
               <>
@@ -7163,6 +7202,7 @@ const S = {
   cardTaskList: { display: "flex", flexDirection: "column", gap: 9, marginTop: 10, paddingLeft: 30 },
   cardTaskRow: { display: "flex", alignItems: "flex-start", gap: 12, cursor: "pointer" },
   snoozeBtn: { display: "inline-flex", alignItems: "center", gap: 2, border: `1px solid ${C.line}`, borderRadius: 7, background: "transparent", color: C.ink3, fontSize: 12, fontWeight: 700, padding: "3px 8px", cursor: "pointer", whiteSpace: "nowrap" },
+  cardNextLine: { marginTop: 4, fontSize: 14, fontWeight: 700, color: C.ink, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word", minWidth: 0 },
   cardNoteLine: { marginTop: 4, fontSize: 13, color: C.ink3, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", whiteSpace: "normal", wordBreak: "break-word", minWidth: 0 },
   cardTaskCheck: { display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", padding: 2, flexShrink: 0, cursor: "pointer" },
   cardTaskTitle: { fontSize: 19, color: C.ink, lineHeight: 1.35, wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" },
@@ -7525,6 +7565,9 @@ const S = {
   mergeToggleOn: { borderColor: C.accent, color: C.accent, background: "rgba(107,138,255,0.12)" },
   mergeHint: { fontSize: 12, color: C.ink3, lineHeight: 1.6, margin: "2px 0 8px 31px" },
   sweepDone: { display: "flex", alignItems: "center", justifyContent: "center", gap: 7, width: "100%", border: "1px solid rgba(81,207,102,0.35)", borderRadius: 10, background: "rgba(81,207,102,0.10)", color: "#8FBF9A", fontSize: 13, fontWeight: 800, padding: "10px 12px", cursor: "pointer", margin: "2px 0 8px 0" },
+  doneFold: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "transparent", color: C.ink3, fontSize: 13, fontWeight: 700, padding: "8px 2px", cursor: "pointer", textAlign: "left" },
+  doneRow: { display: "flex", alignItems: "center", gap: 6, padding: "4px 0" },
+  doneTitle: { flex: 1, minWidth: 0, fontSize: 14, color: C.ink3, textDecoration: "line-through", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   mergeGo: { width: "100%", border: "none", borderRadius: 10, background: C.accent, color: "#0F1318", fontSize: 14.5, fontWeight: 800, padding: "11px 12px", cursor: "pointer", marginTop: 4 },
   rsugSkip: { flexShrink: 0, border: "none", borderRadius: 8, background: "transparent", color: C.ink3, fontWeight: 700, fontSize: 12, padding: "6px 8px", cursor: "pointer" },
   rshSkipBtn: { flexShrink: 0, border: "none", borderRadius: 9, background: "transparent", color: C.ink3, fontWeight: 700, fontSize: 13, padding: "8px 10px", cursor: "pointer" },
