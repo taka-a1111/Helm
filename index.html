@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-14b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-14c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -2780,7 +2780,16 @@ function ProjectCard({ p, onOpen, onSetDeadline, onUpdateTask, onEditTask, onTog
   const statusTint = null; // カンバンの列でステータスが明示されているため、背景色分けは無効化
   const lpTimer = useRef(null);
   const downInfo = useRef(null);
-  const openTasks = p.tasks.filter((t) => !t.done && t.kind !== "reply");
+  // 並びは「自分のボール → 相手のボール」、各グループ内は期限が早い順（日付なしは末尾）。
+  // 手で並べ替えても自動計算に戻るため、案件内のドラッグ並び替えは意味を持たない（案件またぎの移動は有効）。
+  const taskOrderKey = (t) => {
+    const n = daysUntil(taskJudgeDate(t));
+    return [taskBall(p, t) === "them" ? 1 : 0, n === null ? Infinity : n];
+  };
+  const openTasks = p.tasks.filter((t) => !t.done && t.kind !== "reply").slice().sort((a, b) => {
+    const ka = taskOrderKey(a), kb = taskOrderKey(b);
+    return ka[0] - kb[0] || ka[1] - kb[1];
+  });
   const showTasks = openTasks;
   const moreTasks = 0;
   const stop = (e) => e.stopPropagation();
