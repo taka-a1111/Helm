@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-15a"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-15b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -782,7 +782,7 @@ export default function App() {
     };
     cwPullRef.current = pull;
     const t0 = setTimeout(pull, 2000); // フォールバック（通常は同期完了フックで先に走る）
-    const iv = setInterval(pull, 2 * 60 * 1000);
+    const iv = setInterval(pull, 5 * 60 * 1000);
     const onVis = () => { if (document.visibilityState === "visible") pull(); };
     document.addEventListener("visibilitychange", onVis);
     return () => { stopped = true; clearTimeout(t0); clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
@@ -879,10 +879,15 @@ export default function App() {
         if (changed && !stopped && !editingRef2.current) persist(next);
       } catch {}
     };
-    gmailPullRef.current = pull;
-    const t0 = setTimeout(pull, 3000); // フォールバック（通常は同期完了フックで先に走る）
-    const iv = setInterval(pull, 4 * 60 * 1000);
-    const onVis = () => { if (document.visibilityState === "visible") pull(); };
+    // GmailはGASの日次枠（無料20,000回/日）を共有しているため、呼び出し回数を絞る。
+    // 1回の取り込みで検索2回＋スレッド数十件の読み取りが走るので、頻度がそのまま消費量になる。
+    const MIN_GAP = 15 * 60 * 1000;
+    let lastAt = 0;
+    const guarded = () => { const n = Date.now(); if (n - lastAt < MIN_GAP) return; lastAt = n; return pull(); };
+    gmailPullRef.current = guarded;
+    const t0 = setTimeout(guarded, 3000); // フォールバック（通常は同期完了フックで先に走る）
+    const iv = setInterval(guarded, MIN_GAP);
+    const onVis = () => { if (document.visibilityState === "visible") guarded(); };
     document.addEventListener("visibilitychange", onVis);
     return () => { stopped = true; clearTimeout(t0); clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
   }, []);
@@ -1141,7 +1146,7 @@ export default function App() {
   /* ---- 下に引っ張って更新（ページ再読込なしで 同期＋Chatwork＋Gmail を取得） ---- */
   // GASは1日の実行時間に上限がある。短時間に何度も引っ張っても取り込みは呼ばない
   const gasLastRef = useRef(0);
-  const GAS_COOLDOWN = 30 * 1000;
+  const GAS_COOLDOWN = 5 * 60 * 1000;
   const pullIntakeRef = useRef(null), pullMoneyRef = useRef(null); // 後方で定義される取得処理を引っ張り更新から呼ぶため
   const [ptr, setPtr] = useState(0);          // 引っ張り量(px表示用)
   const [ptrBusy, setPtrBusy] = useState(false);
