@@ -69,7 +69,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const STORE_KEY = "cockpit:projects:v2";
 const SYNC_KEY = "cockpit:sync:v1";
 const META_KEY = "cockpit:meta:v1"; // 同期のリビジョン等
-const BUILD_TAG = "2026-09-15b"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
+const BUILD_TAG = "2026-09-15c"; // ビルド識別（端末間で同じ版かの確認用。実装追加ごとに更新）
 
 // ==================== Chatwork自動対応システム（対応待ちパネル） ====================
 // ★ここを書き換える（/exec で終わるGAS WebアプリURLと WEBAPP_TOKEN）
@@ -158,6 +158,19 @@ const FOCUS_FILTERS = [
 ];
 
 const INBOX_ID = "__inbox__";
+
+// GASのGmail日次枠は端末・タブをまたいで共有されている。
+// 何枚開いていても消費が増えないよう、最後に呼んだ時刻をlocalStorageで共有して間隔を守る。
+function gasAllowed(key, gapMs) {
+  try {
+    if (typeof document !== "undefined" && document.hidden) return false; // 裏のタブでは読まない
+    const k = "cockpit:gaslast:" + key;
+    const last = Number(localStorage.getItem(k) || 0);
+    if (Date.now() - last < gapMs) return false;
+    localStorage.setItem(k, String(Date.now()));
+    return true;
+  } catch { return true; }
+}
 function makeInbox() {
   return { id: INBOX_ID, company: "案件なし", platform: "その他", work: "", reward: 0, orphans: [], orphanSkip: [],
     status: "進行中", reply: "なし", deadline: "", note: "",
@@ -780,10 +793,11 @@ export default function App() {
         if (changed && !stopped && !editingRef2.current) persist(next);
       } catch {}
     };
-    cwPullRef.current = pull;
-    const t0 = setTimeout(pull, 2000); // フォールバック（通常は同期完了フックで先に走る）
-    const iv = setInterval(pull, 5 * 60 * 1000);
-    const onVis = () => { if (document.visibilityState === "visible") pull(); };
+    const guardedCw = () => { if (!gasAllowed("chatwork", 5 * 60 * 1000)) return; return pull(); };
+    cwPullRef.current = guardedCw;
+    const t0 = setTimeout(guardedCw, 2000); // フォールバック（通常は同期完了フックで先に走る）
+    const iv = setInterval(guardedCw, 5 * 60 * 1000);
+    const onVis = () => { if (document.visibilityState === "visible") guardedCw(); };
     document.addEventListener("visibilitychange", onVis);
     return () => { stopped = true; clearTimeout(t0); clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
   }, []);
@@ -882,8 +896,7 @@ export default function App() {
     // GmailはGASの日次枠（無料20,000回/日）を共有しているため、呼び出し回数を絞る。
     // 1回の取り込みで検索2回＋スレッド数十件の読み取りが走るので、頻度がそのまま消費量になる。
     const MIN_GAP = 15 * 60 * 1000;
-    let lastAt = 0;
-    const guarded = () => { const n = Date.now(); if (n - lastAt < MIN_GAP) return; lastAt = n; return pull(); };
+    const guarded = () => { if (!gasAllowed("gmail", MIN_GAP)) return; return pull(); };
     gmailPullRef.current = guarded;
     const t0 = setTimeout(guarded, 3000); // フォールバック（通常は同期完了フックで先に走る）
     const iv = setInterval(guarded, MIN_GAP);
